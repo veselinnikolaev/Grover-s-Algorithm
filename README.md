@@ -4,7 +4,7 @@ Veselin Petrov Nikolaev · Supervisors: Marko Rancic, Maximilian Streitberger
 
 ---
 
-## Das Ziel (The Goal)
+## The Goal
 
 This project classically simulates Grover's quantum search algorithm to:
 1. Understand **why** it works (mathematical + geometric structure)
