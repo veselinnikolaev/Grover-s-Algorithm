@@ -368,16 +368,16 @@ if __name__ == "__main__":
     df_scale = experiment_scalability(qubit_range=range(2, 21), n_shots=512)
 
     # Experiment 2: iteration sweep on n=5
-    #df_iter = experiment_iteration_sweep(n_qubits=5, n_shots=2048)
+    df_iter = experiment_iteration_sweep(n_qubits=5, n_shots=2048)
 
     # Experiment 3: classical vs quantum query complexity
-    #df_compare = experiment_classical_comparison(qubit_range=range(1, 18))
+    df_compare = experiment_classical_comparison(qubit_range=range(1, 18))
 
     # Experiment 4: circuit depth
-    ##df_depth = experiment_circuit_depth(qubit_range=range(2, 16))
+    df_depth = experiment_circuit_depth(qubit_range=range(2, 16))
 
     # Experiment 5: GPU (will show CPU-only if no GPU)
-    #df_gpu = experiment_gpu_comparison(qubit_range=range(10, 24), n_shots=256)
+    df_gpu = experiment_gpu_comparison(qubit_range=range(10, 24), n_shots=256)
 
     print("\n\nAll experiments complete. Results saved in ./results/")
     print("Run:  python plot_results.py  to generate figures.")
