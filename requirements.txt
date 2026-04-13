@@ -7,4 +7,4 @@ matplotlib>=3.7.0
 psutil>=5.9.0
 
 # For GPU support (optional, requires CUDA):
-# qiskit-aer-gpu>=0.14.0
+qiskit-aer-gpu>=0.14.0
