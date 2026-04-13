@@ -244,16 +244,11 @@ def experiment_gpu_comparison(qubit_range=range(10, 26), n_shots=256):
     print("="*60)
 
     # Check GPU availability
-    try:
-        gpu_backend = AerSimulator(method="statevector", device="GPU")
-        gpu_available = True
-        print("  GPU backend: available ✓")
-    except Exception:
-        gpu_available = False
-        print("  GPU backend: not available — running CPU only")
-        print("  (Install qiskit-aer-gpu and CUDA to enable GPU simulation)")
+    gpu_available = _check_gpu_available()
+    print(f"  GPU backend: {'available ✓' if gpu_available else 'not available — running CPU only'}")
 
     cpu_backend = AerSimulator(method="statevector")
+    gpu_backend = AerSimulator(method="statevector", device="GPU") if gpu_available else None  
     records = []
 
     for n in qubit_range:
@@ -296,6 +291,18 @@ def experiment_gpu_comparison(qubit_range=range(10, 26), n_shots=256):
     print(f"\n  Saved: results/gpu_comparison.csv")
     return df
 
+def _check_gpu_available() -> bool:
+    """Actually probe GPU by running a tiny circuit."""
+    try:
+        from qiskit import QuantumCircuit
+        from qiskit_aer import AerSimulator
+        qc = QuantumCircuit(1)
+        qc.h(0)
+        qc.measure_all()
+        AerSimulator(method="statevector", device="GPU").run(qc, shots=1).result()
+        return True
+    except Exception:
+        return False
 
 # ===========================================================================
 # Hand-worked 2-qubit example (for the report)
