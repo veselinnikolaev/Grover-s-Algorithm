@@ -2,14 +2,24 @@
 plot_results.py
 ===============
 Generate publication-quality figures from the experiment CSVs.
-Run after experiments.py:
+Run after experiments.py (and optionally after hpc experiments):
     python plot_results.py
+
+Figures produced
+----------------
+  fig1_scalability        — simulation time, memory, circuit complexity
+  fig2_iteration_sweep    — success probability vs Grover iterations
+  fig3_speedup            — Grover vs classical query complexity
+  fig4_circuit_depth      — circuit depth & gate count
+  fig5_gpu                — CPU vs GPU comparison (gpu_comparison.csv)
+  fig6_hpc_dashboard      — HPC: 3-panel combined dashboard (GPU vs CPU)
 """
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.ticker as mticker
 from math import pi, sqrt, floor, log2
 import os, warnings
 
@@ -27,12 +37,50 @@ plt.rcParams.update({
 })
 
 COLORS = {
-    "quantum": "#2563EB",
-    "classical": "#DC2626",
-    "theory": "#16A34A",
-    "memory": "#9333EA",
-    "accent": "#F59E0B",
+    "quantum":  "#2563EB",
+    "classical":"#DC2626",
+    "theory":   "#16A34A",
+    "memory":   "#9333EA",
+    "accent":   "#F59E0B",
+    "gpu":      "#2563EB",
+    "cpu":      "#DC2626",
+    "speedup":  "#F59E0B",
 }
+
+_HPC_COLS = ["n_qubits", "N", "sim_time_s", "mem_mb_theoretical", "device"]
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _exp_fit(n, t):
+    """Fit t = exp(a + b*n) via OLS on log(t).  Returns (a, b)."""
+    coeffs = np.polyfit(n, np.log(np.array(t, dtype=float) + 1e-12), 1)
+    return coeffs[1], coeffs[0]
+
+
+def _fmt_time(s):
+    """Human-readable time label for log-scale y-axes."""
+    if s >= 3600:
+        return f"{s/3600:.1f} h"
+    if s >= 60:
+        return f"{s/60:.1f} min"
+    return f"{s:.2f} s"
+
+
+def _load_hpc_gpu():
+    path = "results/hpc_scalability_gpu.csv"
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    return pd.read_csv(path)
+
+
+def _load_hpc_cpu():
+    path = "results/hpc_scalability_cpu.csv"
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    return pd.read_csv(path, header=None, names=_HPC_COLS)
 
 
 # ---------------------------------------------------------------------------
@@ -50,10 +98,8 @@ def plot_scalability():
 
     n = df["n_qubits"].values
 
-    # 1a: Simulation time
     ax = axes[0]
     ax.semilogy(n, df["sim_time_s"], "o-", color=COLORS["quantum"], lw=2, ms=5, label="Measured")
-    # Fit exponential guide
     if len(n) > 3:
         coeffs = np.polyfit(n, np.log(df["sim_time_s"] + 1e-9), 1)
         ax.semilogy(n, np.exp(np.polyval(coeffs, n)), "--", color=COLORS["theory"],
@@ -63,24 +109,19 @@ def plot_scalability():
     ax.set_title("Simulation Time")
     ax.legend(fontsize=9)
 
-    # 1b: Memory
     ax = axes[1]
-    theory_mem = [(2**ni * 16) / (1024**2) for ni in n]
     ax.semilogy(n, df["mem_delta_mb"], "o-", color=COLORS["memory"],
-                lw=2, ms=5, label="Measured (RSS delta)")
-    ax.semilogy(n, theory_mem, "--", color=COLORS["theory"],
+                lw=2, ms=5, label="Measured (peak RSS delta)")
+    ax.semilogy(n, df["statevector_size_mb"], "--", color=COLORS["theory"],
                 lw=1.5, alpha=0.8, label="Theory: 16·2ⁿ bytes")
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Memory (MB)")
     ax.set_title("Memory Consumption")
     ax.legend(fontsize=9)
-
-    # Add RAM thresholds
     for label, gb in [("8 GB RAM", 8192), ("16 GB", 16384), ("64 GB", 65536)]:
         ax.axhline(gb, color="gray", lw=0.8, ls=":")
         ax.text(n[0], gb * 1.1, label, color="gray", fontsize=8)
 
-    # 1c: Circuit metrics
     ax = axes[2]
     ax.plot(n, df["circuit_depth"], "s-", color=COLORS["classical"], lw=2, ms=5, label="Depth")
     ax.plot(n, df["circuit_gate_count"], "^-", color=COLORS["accent"], lw=2, ms=5, label="Gate count")
@@ -115,11 +156,9 @@ def plot_iteration_sweep():
     ax.plot(k, df["p_theory"], "-", color=COLORS["theory"],
             lw=2, alpha=0.8, label=r"Theory: $\sin^2((2k+1)\theta)$")
 
-    # Mark optimal k
     n_qubits = int(df["n_qubits"].iloc[0])
     k_opt = floor((pi / 4) * sqrt(2**n_qubits))
-    ax.axvline(k_opt, color=COLORS["accent"], ls="--", lw=1.5,
-               label=f"k_opt = {k_opt}")
+    ax.axvline(k_opt, color=COLORS["accent"], ls="--", lw=1.5, label=f"k_opt = {k_opt}")
     ax.annotate(f"k_opt = {k_opt}\n(peak)", xy=(k_opt, 1.0),
                 xytext=(k_opt + 2, 0.85),
                 arrowprops=dict(arrowstyle="->", color="gray"),
@@ -134,8 +173,7 @@ def plot_iteration_sweep():
 
     note = (f"Key insight: over-rotating past k_opt reduces P(success).\n"
             f"The sinusoidal pattern reflects state-vector rotation by 2θ per iteration.")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes,
-            fontsize=8.5, color="gray", va="bottom")
+    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
     fig.savefig("figures/fig2_iteration_sweep.pdf", bbox_inches="tight")
@@ -160,7 +198,6 @@ def plot_classical_comparison():
     n = df["n_qubits"].values
     N = df["N"].values
 
-    # 3a: Query count comparison
     ax = axes[0]
     ax.semilogy(n, df["classical_queries_expected"], "s-",
                 color=COLORS["classical"], lw=2, ms=5, label="Classical O(N/2)")
@@ -172,10 +209,8 @@ def plot_classical_comparison():
     ax.legend()
     ax.grid(True, alpha=0.3, which="both")
 
-    # 3b: Speedup factor
     ax = axes[1]
     ax.plot(n, df["speedup_factor"], "o-", color=COLORS["accent"], lw=2, ms=5)
-    # Theoretical: speedup = √N/2
     ax.plot(n, np.sqrt(N) / 2, "--", color="gray", lw=1.5, alpha=0.8, label="Theory: √N/2")
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Speedup factor (classical / Grover queries)")
@@ -184,8 +219,7 @@ def plot_classical_comparison():
     ax.grid(True, alpha=0.3)
 
     note = "Note: Grover gives a quadratic speedup, not exponential.\nFor n=30 (N≈10⁹), classical≈500M queries, Grover≈25K queries."
-    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes,
-                 fontsize=8.5, color="gray", va="bottom")
+    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
     fig.savefig("figures/fig3_speedup.pdf", bbox_inches="tight")
@@ -224,8 +258,7 @@ def plot_circuit_depth():
     ax.grid(True, alpha=0.3, which="both")
 
     note = "On real hardware: circuit depth ∝ accumulated noise.\nThis is why quantum advantage for search is not yet demonstrated at scale."
-    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes,
-                 fontsize=8.5, color="gray", va="bottom")
+    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
     fig.savefig("figures/fig4_circuit_depth.pdf", bbox_inches="tight")
@@ -235,7 +268,7 @@ def plot_circuit_depth():
 
 
 # ---------------------------------------------------------------------------
-# Figure 5: GPU comparison (if data exists)
+# Figure 5: GPU comparison (gpu_comparison.csv — original experiment)
 # ---------------------------------------------------------------------------
 
 def plot_gpu_comparison():
@@ -252,20 +285,26 @@ def plot_gpu_comparison():
     fig.suptitle("Figure 5 — CPU vs GPU Simulation Time", fontweight="bold")
 
     n = df["n_qubits"].values
+
     ax = axes[0]
     ax.semilogy(n, df["cpu_time_s"], "o-", color=COLORS["classical"], lw=2, ms=5, label="CPU")
     if not df["gpu_time_s"].isna().all():
         ax.semilogy(n, df["gpu_time_s"].dropna(), "s-",
                     color=COLORS["quantum"], lw=2, ms=5, label="GPU")
-    ax.set_xlabel("Number of qubits  n"); ax.set_ylabel("Simulation time (s)")
-    ax.set_title("CPU vs GPU Time"); ax.legend(); ax.grid(True, alpha=0.3, which="both")
+    ax.set_xlabel("Number of qubits  n")
+    ax.set_ylabel("Simulation time (s)")
+    ax.set_title("CPU vs GPU Time")
+    ax.legend()
+    ax.grid(True, alpha=0.3, which="both")
 
     ax = axes[1]
     if not df["speedup"].isna().all():
         ax.plot(df["n_qubits"], df["speedup"], "o-", color=COLORS["accent"], lw=2, ms=5)
         ax.axhline(1.0, color="gray", ls="--", lw=1)
-        ax.set_xlabel("Number of qubits  n"); ax.set_ylabel("GPU speedup (CPU/GPU time)")
-        ax.set_title("GPU Acceleration Factor"); ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Number of qubits  n")
+        ax.set_ylabel("GPU speedup (CPU/GPU time)")
+        ax.set_title("GPU Acceleration Factor")
+        ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     fig.savefig("figures/fig5_gpu.pdf", bbox_inches="tight")
@@ -274,11 +313,98 @@ def plot_gpu_comparison():
     plt.close()
 
 
+# ---------------------------------------------------------------------------
+# Figure 6: HPC — Combined 3-panel dashboard
+# ---------------------------------------------------------------------------
+
+def plot_hpc_dashboard(gpu, cpu):
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+    fig.suptitle("Figure 6 — HPC Results Dashboard: Grover's Algorithm", fontweight="bold")
+
+    gn, gt = gpu["n_qubits"].values, gpu["sim_time_s"].values
+    cn, ct = cpu["n_qubits"].values, cpu["sim_time_s"].values
+
+    # Panel A: Simulation time
+    ax = axes[0]
+    ax.semilogy(gn, gt, "o-", color=COLORS["gpu"],  lw=2, ms=5, label="GPU")
+    ax.semilogy(cn, ct, "s-", color=COLORS["cpu"],  lw=2, ms=5, label="CPU")
+    ga, gb = _exp_fit(gn, gt)
+    ca, cb = _exp_fit(cn, ct)
+    ax.semilogy(np.linspace(gn[0], gn[-1], 200),
+                np.exp(ga + gb * np.linspace(gn[0], gn[-1], 200)),
+                "--", color=COLORS["gpu"], lw=1.2, alpha=0.6)
+    ax.semilogy(np.linspace(cn[0], cn[-1], 200),
+                np.exp(ca + cb * np.linspace(cn[0], cn[-1], 200)),
+                "--", color=COLORS["cpu"], lw=1.2, alpha=0.6)
+    ax.set_xlabel("Number of qubits  n")
+    ax.set_ylabel("Simulation time (s)")
+    ax.set_title("A — Simulation Time")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: _fmt_time(v)))
+    ax.legend(fontsize=9)
+    ax.grid(True, which="both", alpha=0.2)
+
+    # Panel B: Memory
+    ax = axes[1]
+    ax.semilogy(gpu["n_qubits"].values, gpu["mem_mb_theoretical"].values, "o-",
+                color=COLORS["memory"], lw=2, ms=5, label="16·2ⁿ bytes")
+    for label, gb_val in [("8 GB", 8192), ("16 GB", 16384), ("32 GB", 32768)]:
+        ax.axhline(gb_val, color="gray", lw=0.7, ls=":")
+        ax.text(gn[0] + 0.1, gb_val * 1.12, label, color="gray", fontsize=7.5)
+    ax.set_xlabel("Number of qubits  n")
+    ax.set_ylabel("Memory (MB)")
+    ax.set_title("B — Statevector Memory")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(
+        lambda v, _: f"{v/1024:.0f} GB" if v >= 1024 else f"{v:.0f} MB"
+    ))
+    ax.legend(fontsize=9)
+    ax.grid(True, which="both", alpha=0.2)
+
+    # Panel C: Speedup
+    ax = axes[2]
+    gpu_idx  = {row.n_qubits: row.sim_time_s for row in gpu.itertuples()}
+    cpu_idx  = {row.n_qubits: row.sim_time_s for row in cpu.itertuples()}
+    shared   = sorted(set(gpu_idx) & set(cpu_idx))
+    speedups = [cpu_idx[n] / gpu_idx[n] for n in shared]
+    ax.bar(shared, speedups, color=COLORS["speedup"], edgecolor="none", width=0.6, zorder=3)
+    ax.axhline(1, color="gray", ls="--", lw=1, alpha=0.6)
+    for x, sp in zip(shared, speedups):
+        ax.text(x, sp + 0.15, f"{sp:.1f}×", ha="center", va="bottom", fontsize=8)
+    ax.set_xlabel("Number of qubits  n")
+    ax.set_ylabel("Speedup factor")
+    ax.set_title("C — GPU Speedup over CPU")
+    ax.set_xticks(shared)
+    ax.tick_params(axis="x", labelrotation=45)
+    ax.grid(True, axis="y", alpha=0.2)
+    ax.set_ylim(0, max(speedups) * 1.25)
+
+    plt.tight_layout()
+    fig.savefig("figures/fig6_hpc_dashboard.pdf", bbox_inches="tight")
+    fig.savefig("figures/fig6_hpc_dashboard.png", bbox_inches="tight")
+    print("  Saved: figures/fig6_hpc_dashboard.{pdf,png}")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     print("\nGenerating figures from results/...\n")
+
     plot_scalability()
     plot_iteration_sweep()
     plot_classical_comparison()
     plot_circuit_depth()
     plot_gpu_comparison()
+
+    hpc_gpu, hpc_cpu = None, None
+    try:
+        hpc_gpu = _load_hpc_gpu()
+        hpc_cpu = _load_hpc_cpu()
+    except FileNotFoundError as e:
+        print(f"  {e} — skipping HPC figures\n")
+
+    if hpc_gpu is not None and hpc_cpu is not None:
+        plot_hpc_dashboard(hpc_gpu, hpc_cpu)
+
     print("\nAll figures saved in ./figures/")

@@ -10,10 +10,19 @@ Qiskit measures qubit i -> classical bit i, printed with bit 0 RIGHTMOST.
 Our oracle marks qubit i = bit i of target integer (LSB = qubit 0).
 Result: the Qiskit measurement key for target N is just format(N, '0nb'),
 i.e. standard binary — NO reversal needed when oracle is written LSB-first.
+
+Memory measurement
+------------------
+We sample OS-level RSS (Resident Set Size) in a background thread at 10ms
+intervals while Aer runs the statevector simulation. This captures C++-level
+allocations that tracemalloc cannot see. The baseline RSS (before simulation)
+is subtracted so we report only the memory added by the simulation itself.
+The result is then validated against the theoretical 16·2ⁿ bytes.
 """
 
 import numpy as np
 import time
+import threading
 import psutil
 import os
 from math import pi, sqrt, floor
@@ -21,6 +30,39 @@ from math import pi, sqrt, floor
 from qiskit import QuantumCircuit
 from qiskit_aer import AerSimulator
 
+
+# ---------------------------------------------------------------------------
+# Background RSS sampler
+# ---------------------------------------------------------------------------
+
+def _start_rss_sampler(interval: float = 0.01):
+    """
+    Poll process RSS every `interval` seconds in a background daemon thread.
+    Returns (thread, stop_event, peak_list) — call stop_event.set() to stop,
+    then read peak_list[0] for the peak RSS in bytes.
+    """
+    proc = psutil.Process(os.getpid())
+    peak = [proc.memory_info().rss]
+    stop = threading.Event()
+
+    def _poll():
+        while not stop.is_set():
+            try:
+                current = proc.memory_info().rss
+                if current > peak[0]:
+                    peak[0] = current
+            except Exception:
+                pass
+            stop.wait(interval)
+
+    t = threading.Thread(target=_poll, daemon=True)
+    t.start()
+    return t, stop, peak
+
+
+# ---------------------------------------------------------------------------
+# Oracle
+# ---------------------------------------------------------------------------
 
 def build_oracle(n_qubits: int, target: int) -> QuantumCircuit:
     """
@@ -52,6 +94,10 @@ def build_oracle(n_qubits: int, target: int) -> QuantumCircuit:
     return oracle
 
 
+# ---------------------------------------------------------------------------
+# Diffuser
+# ---------------------------------------------------------------------------
+
 def build_diffuser(n_qubits: int) -> QuantumCircuit:
     """
     Grover diffuser: D = 2|s><s| - I = H^n (2|0><0|-I) H^n
@@ -80,6 +126,10 @@ def build_diffuser(n_qubits: int) -> QuantumCircuit:
     return diffuser
 
 
+# ---------------------------------------------------------------------------
+# Circuit builder
+# ---------------------------------------------------------------------------
+
 def build_grover_circuit(n_qubits: int, target: int, n_iterations: int = None) -> QuantumCircuit:
     """Full Grover circuit: superposition -> k*(oracle+diffuser) -> measure."""
     N = 2 ** n_qubits
@@ -102,22 +152,42 @@ def build_grover_circuit(n_qubits: int, target: int, n_iterations: int = None) -
     return qc
 
 
+# ---------------------------------------------------------------------------
+# Main simulation entry point
+# ---------------------------------------------------------------------------
+
 def simulate_grover(n_qubits: int, target: int, n_shots: int = 1024,
                     n_iterations: int = None, verbose: bool = True):
-    """Run Grover simulation and return stats dict."""
-    process = psutil.Process(os.getpid())
-    mem_before = process.memory_info().rss / (1024 ** 2)
+    """
+    Run Grover simulation and return stats dict.
+
+    Memory is measured as the peak RSS delta during simulation using a
+    background polling thread (10ms interval). This correctly captures
+    Aer's C++ statevector allocation, unlike tracemalloc which only
+    sees Python-level allocations.
+    """
+    proc = psutil.Process(os.getpid())
 
     t0 = time.perf_counter()
     qc = build_grover_circuit(n_qubits, target, n_iterations)
     t_built = time.perf_counter()
+
+    # Snapshot baseline RSS just before simulation starts
+    baseline_rss = proc.memory_info().rss
+
+    # Start background RSS sampler, then run simulation
+    sampler, stop_event, peak_rss = _start_rss_sampler(interval=0.01)
 
     backend = AerSimulator(method="statevector")
     job = backend.run(qc, shots=n_shots)
     result = job.result()
     t_done = time.perf_counter()
 
-    mem_after = process.memory_info().rss / (1024 ** 2)
+    # Stop sampler and compute peak delta
+    stop_event.set()
+    sampler.join()
+    peak_delta_mb = max(0.0, (peak_rss[0] - baseline_rss) / (1024 ** 2))
+
     counts = result.get_counts()
     total_shots = sum(counts.values())
 
@@ -135,6 +205,7 @@ def simulate_grover(n_qubits: int, target: int, n_shots: int = 1024,
     N = 2 ** n_qubits
     optimal_iters = max(1, floor((pi / 4) * sqrt(N)))
     actual_iters = n_iterations if n_iterations is not None else optimal_iters
+    statevector_mb = (2 ** n_qubits * 16) / (1024 ** 2)
 
     stats = {
         "n_qubits": n_qubits, "N": N, "target": target,
@@ -143,9 +214,8 @@ def simulate_grover(n_qubits: int, target: int, n_shots: int = 1024,
         "success_probability": success_probability,
         "build_time_s": t_built - t0, "sim_time_s": t_done - t_built,
         "total_time_s": t_done - t0,
-        "mem_before_mb": mem_before, "mem_after_mb": mem_after,
-        "mem_delta_mb": mem_after - mem_before,
-        "statevector_size_mb": (2 ** n_qubits * 16) / (1024 ** 2),
+        "mem_delta_mb": peak_delta_mb,         # real measured peak RSS delta
+        "statevector_size_mb": statevector_mb,  # theoretical 16·2ⁿ, used as theory line
         "counts": counts,
         "circuit_depth": qc.depth(), "circuit_gate_count": qc.size(),
     }
@@ -161,8 +231,8 @@ def simulate_grover(n_qubits: int, target: int, n_shots: int = 1024,
         print(f"  Circuit gates:   {stats['circuit_gate_count']}")
         print(f"  Build time:      {stats['build_time_s']:.4f} s")
         print(f"  Sim time:        {stats['sim_time_s']:.4f} s")
-        print(f"  Memory delta:    {stats['mem_delta_mb']:.1f} MB")
-        print(f"  Statevec size:   {stats['statevector_size_mb']:.2f} MB (theoretical)")
+        print(f"  Mem peak delta:  {peak_delta_mb:.2f} MB  (measured RSS)")
+        print(f"  Statevec size:   {statevector_mb:.2f} MB  (theoretical 16·2ⁿ)")
         print(f"  P(success):      {success_probability:.4f}  "
               f"({'✓ FOUND' if success_probability > 0.5 else '✗ LOW'})")
         print(f"{'='*60}")

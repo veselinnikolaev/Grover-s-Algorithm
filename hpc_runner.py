@@ -6,22 +6,42 @@ Submit this as a batch job on a cluster with SLURM.
 
 Example SLURM script (save as submit.sh):
 ------------------------------------------
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=grover_sim
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --mem=128G
 #SBATCH --cpus-per-task=32
 #SBATCH --output=grover_%j.log
-#SBATCH --partition=bigmem
+#SBATCH --error=grover_%j.err
+#SBATCH --partition=batch
 
-module load python/3.11
+module load lang/Python/3.11.5-GCCcore-13.2.0
+
+cd ~/grover_hpc
 source venv/bin/activate
+
 python hpc_runner.py --min_qubits 20 --max_qubits 30 --shots 128
 ------------------------------------------
 
 For GPU partition:
-#SBATCH --gres=gpu:1
+#!/bin/bash -l
+#SBATCH --job-name=grover_gpu
+#SBATCH --time=48:00:00
+#SBATCH --mem=128G
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:volta:1
+#SBATCH --output=grover_gpu_%j.log
+#SBATCH --error=grover_gpu_%j.err
 #SBATCH --partition=gpu
+
+module load lang/Python/3.11.5-GCCcore-13.2.0
+module load system/CUDA/12.6.0
+
+export LD_LIBRARY_PATH=$CUDA_ROOT/lib64:$LD_LIBRARY_PATH
+
+cd ~/grover_hpc
+source venv_gpu/bin/activate
+
 python hpc_runner.py --min_qubits 20 --max_qubits 33 --gpu --shots 128
 """
 

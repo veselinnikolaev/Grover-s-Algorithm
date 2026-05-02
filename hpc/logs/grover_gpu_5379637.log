@@ -1,0 +1,26 @@
+HPC Grover simulation: n=20..33, device=GPU, shots=128
+n=20: need 16 MB, available 718265 MB
+  → time=3.07s  (mem=16 MB)
+n=21: need 32 MB, available 718037 MB
+  → time=5.54s  (mem=32 MB)
+n=22: need 64 MB, available 717955 MB
+  → time=11.47s  (mem=64 MB)
+n=23: need 128 MB, available 717814 MB
+  → time=25.99s  (mem=128 MB)
+n=24: need 256 MB, available 717554 MB
+  → time=64.52s  (mem=256 MB)
+n=25: need 512 MB, available 717055 MB
+  → time=173.74s  (mem=512 MB)
+n=26: need 1024 MB, available 717377 MB
+  → time=485.30s  (mem=1024 MB)
+n=27: need 2048 MB, available 712715 MB
+  → time=1385.81s  (mem=2048 MB)
+n=28: need 4096 MB, available 701767 MB
+  → time=4009.61s  (mem=4096 MB)
+n=29: need 8192 MB, available 732176 MB
+  → time=11708.95s  (mem=8192 MB)
+n=30: need 16384 MB, available 709288 MB
+  → time=34077.69s  (mem=16384 MB)
+n=31: need 32768 MB, available 708961 MB
+  → time=93411.24s  (mem=32768 MB)
+n=32: need 65536 MB, available 745333 MB
