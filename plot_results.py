@@ -319,7 +319,7 @@ def plot_gpu_comparison():
 
 def plot_hpc_dashboard(gpu, cpu):
     fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
-    fig.suptitle("Figure 6 — HPC Results Dashboard: Grover's Algorithm", fontweight="bold")
+    fig.suptitle("Figure 6 — HPC Results: Grover's Algorithm", fontweight="bold")
 
     gn, gt = gpu["n_qubits"].values, gpu["sim_time_s"].values
     cn, ct = cpu["n_qubits"].values, cpu["sim_time_s"].values
@@ -328,6 +328,8 @@ def plot_hpc_dashboard(gpu, cpu):
     ax = axes[0]
     ax.semilogy(gn, gt, "o-", color=COLORS["gpu"],  lw=2, ms=5, label="GPU")
     ax.semilogy(cn, ct, "s-", color=COLORS["cpu"],  lw=2, ms=5, label="CPU")
+    ax.semilogy(cn, ct, "--", color=COLORS["cpu"],  lw=2, ms=5, label="CPU Theory")
+    ax.semilogy(gn, gt, "--", color=COLORS["gpu"],  lw=2, ms=5, label="GPU Theory")
     ga, gb = _exp_fit(gn, gt)
     ca, cb = _exp_fit(cn, ct)
     ax.semilogy(np.linspace(gn[0], gn[-1], 200),
@@ -338,7 +340,7 @@ def plot_hpc_dashboard(gpu, cpu):
                 "--", color=COLORS["cpu"], lw=1.2, alpha=0.6)
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Simulation time (s)")
-    ax.set_title("A — Simulation Time")
+    ax.set_title("Simulation Time")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: _fmt_time(v)))
     ax.legend(fontsize=9)
     ax.grid(True, which="both", alpha=0.2)
@@ -352,7 +354,7 @@ def plot_hpc_dashboard(gpu, cpu):
         ax.text(gn[0] + 0.1, gb_val * 1.12, label, color="gray", fontsize=7.5)
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Memory (MB)")
-    ax.set_title("B — Statevector Memory")
+    ax.set_title("Statevector Memory")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(
         lambda v, _: f"{v/1024:.0f} GB" if v >= 1024 else f"{v:.0f} MB"
     ))
@@ -371,16 +373,16 @@ def plot_hpc_dashboard(gpu, cpu):
         ax.text(x, sp + 0.15, f"{sp:.1f}×", ha="center", va="bottom", fontsize=8)
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Speedup factor")
-    ax.set_title("C — GPU Speedup over CPU")
+    ax.set_title("GPU Speedup over CPU")
     ax.set_xticks(shared)
     ax.tick_params(axis="x", labelrotation=45)
     ax.grid(True, axis="y", alpha=0.2)
     ax.set_ylim(0, max(speedups) * 1.25)
 
     plt.tight_layout()
-    fig.savefig("figures/fig6_hpc_dashboard.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig6_hpc_dashboard.png", bbox_inches="tight")
-    print("  Saved: figures/fig6_hpc_dashboard.{pdf,png}")
+    fig.savefig("figures/fig6_hpc.pdf", bbox_inches="tight")
+    fig.savefig("figures/fig6_hpc.png", bbox_inches="tight")
+    print("  Saved: figures/fig6_hpc.{pdf,png}")
     plt.close()
 
 
