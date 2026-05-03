@@ -47,10 +47,7 @@ grover-s-algorithm/
     ├── fig3_speedup.png/pdf
     ├── fig4_circuit_depth.png/pdf
     ├── fig5_gpu.png/pdf
-    ├── fig6_hpc_sim_time.png/pdf
-    ├── fig7_hpc_memory.png/pdf
-    ├── fig8_hpc_speedup.png/pdf
-    └── fig9_hpc_dashboard.png/pdf
+    └── fig6_hpc_dashboard.png/pdf
 ```
 
 ---
@@ -192,6 +189,32 @@ sbatch hpc/jobs/submit_gpu.sh    # GPU on IRIS
 | 4 | Circuit depth | depth & gate count vs n |
 | 5 | GPU comparison | CPU vs GPU speedup, crossover point |
 | — | 2-qubit example | step-by-step numpy trace, verified with Qiskit |
+
+---
+
+## Sample Output — Local (RTX 4060 Laptop, WSL2/Ubuntu 22.04)
+
+Experiment 5 measures the CPU vs GPU crossover point on local hardware:
+
+```
+n=10: CPU=0.015s, GPU=1.658s   ← GPU cold-start / CUDA init penalty
+n=11: CPU=0.026s, GPU=0.055s
+n=12: CPU=0.041s, GPU=0.079s
+n=13: CPU=0.091s, GPU=0.107s
+n=14: CPU=0.210s, GPU=0.156s   ← crossover: GPU faster from here
+n=15: CPU=0.144s, GPU=0.183s
+n=16: CPU=0.248s, GPU=0.273s
+n=17: CPU=0.501s, GPU=0.440s
+n=18: CPU=1.082s, GPU=0.766s
+n=19: CPU=2.620s, GPU=1.920s
+n=20: CPU=8.435s, GPU=4.494s
+n=21: CPU=19.661s, GPU=12.606s
+n=22: CPU=113.298s, GPU=32.823s
+n=23: CPU=347.398s, GPU=99.271s   ← GPU ~3.5x faster, gap widening
+```
+
+GPU crossover occurs around **n=14** on this hardware (statevector ≈ 256 KB).
+For large n, the GPU advantage grows as memory bandwidth and parallelism dominate.
 
 ---
 
