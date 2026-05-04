@@ -1,7 +1,7 @@
 \documentclass[11pt, a4paper]{article}
 
-\usepackage[utf-8]{inputenc}
 \usepackage[ngerman]{babel}
+\usepackage[utf8]{inputenc}
 \usepackage[margin=1in]{geometry}
 \usepackage{setspace}
 
@@ -23,8 +23,8 @@ Die zentrale Komponente des Projekts ist eine tiefgreifende Untersuchung von Gro
 
 Der Algorithmus wurde mit Qiskit Aer als vollständiger Zustandsvektorsimulator implementiert und auf klassischer Hardware simuliert. Eine systematische experimentelle Evaluierung wurde durchgeführt, um Ausführungszeit, Speicherverbrauch und Skalierbarkeit als Funktion der Anzahl von Qubits zu messen. Die Experimente umfassten die Messung des klassischen Suchalgorithmus, die Bestätigung des optimalen Iterationsverhaltens und die systematische Analyse der Schaltungstiefe.
 
-Die Skalierungsstudien zeigten, dass der Speicherverbrauch exponentiell mit der Qubit-Anzahl wächst und das primäre Engpass für die klassische Simulation darstellt. Das Projekt evaluierte die Leistung auf verschiedenen Rechnerarchitekturen: lokale CPUs, GPUs und Hochleistungsrecheninfrastrukturen (HPC) des Universitätsnetzes, einschließlich des AION-CPU-Clusters und des IRIS-GPU-Clusters mit Tesla-V100-GPUs. GPU-Beschleunigung erreichte einen konsistenten Vorteil von etwa 12× bei größeren Qubit-Anzahlen, überwand aber nicht die grundlegende exponenzielle Speicherwand.
+Die Skalierungsstudien zeigten, dass der Speicherverbrauch exponentiell mit der Qubit-Anzahl wächst und das primäre Engpass für die klassische Simulation darstellt. Das Projekt evaluierte die Leistung auf verschiedenen Rechnerarchitekturen: lokale CPUs, GPUs und Hochleistungsrecheninfrastrukturen (HPC) des Universitätsnetzes, einschließlich des AION-CPU-Clusters und des IRIS-GPU-Clusters mit Tesla-V100-GPUs. GPU-Beschleunigung erreichte einen konsistenten Vorteil von etwa $12{\times}$ bei größeren Qubit-Anzahlen, überwand aber nicht die grundlegende exponenzielle Speicherwand.
 
-Das Projekt demonstriert, dass Grovers Algorithmus tatsächlich eine quadratische Beschleunigung (O(√N) gegenüber O(N)) gegenüber klassischen Suchmethoden bietet, wie durch Query-Komplexitätsmessungen bestätigt. Allerdings wird diese theoretische Überlegenheit durch praktische klassische Simulationsgrenzen erheblich gemindert. Das Projekt klärt sowohl die Stärken als auch die praktischen Grenzen von Grovers quadratischer Beschleunigung auf und zeigt, wie theoretische Quantenvorteile unter Berücksichtigung klassischer Ressourcenbeschränkungen neu bewertet werden müssen.
+Das Projekt demonstriert, dass Grovers Algorithmus tatsächlich eine quadratische Beschleunigung ($O(\sqrt{N})$ gegenüber $O(N)$) gegenüber klassischen Suchmethoden bietet, wie durch Query-Komplexitätsmessungen bestätigt. Allerdings wird diese theoretische Überlegenheit durch praktische klassische Simulationsgrenzen erheblich gemindert. Das Projekt klärt sowohl die Stärken als auch die praktischen Grenzen von Grovers quadratischer Beschleunigung auf und zeigt, wie theoretische Quantenvorteile unter Berücksichtigung klassischer Ressourcenbeschränkungen neu bewertet werden müssen.
 
 \end{document}
