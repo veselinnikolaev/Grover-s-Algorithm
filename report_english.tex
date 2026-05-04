@@ -1,0 +1,193 @@
+\documentclass[sigconf, authorversion=true, nonacm=true]{acmart}
+
+\acmConference[Bachelor Semester Project S2 (Academic Year 2024/25), University of Luxembourg]{}{}{}
+
+\usepackage[utf-8]{inputenc}
+
+\title{Classical Simulation and Experimental Analysis of Grover's Algorithm}
+
+\author{Veselin Petrov Nikolaev}
+\affiliation{%
+  \institution{University of Luxembourg}
+  \department{Faculty of Science, Technology and Medicine}
+  \country{Luxembourg}
+}
+\email{veselin.nikolaev.001@student.uni.lu}
+
+\begin{abstract}
+This project presents a comprehensive classical simulation and experimental analysis of Grover's search algorithm. We implemented a full Qiskit Aer-based statevector simulator including oracle construction, diffusion operators, and adaptive iteration counts. Through systematic experiments, we confirmed the expected quadratic query speedup (O($\sqrt{N}$) versus O($N$)) and demonstrated the characteristic overshoot behavior of Grover iterations. We evaluated scalability across CPU, GPU, and HPC infrastructures, revealing that memory growth of the statevector representation is the dominant bottleneck. GPU acceleration provided consistent 12× speedup on large instances, but neither GPU nor HPC eliminated the fundamental exponential memory wall. Our analysis clarifies the practical limits of quantum algorithms in classical simulation and the realistic impact of Grover's theoretical advantages.
+\end{abstract}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Grover's algorithm~\cite{Grover1996} represents one of the most important quantum algorithms, providing a quadratic speedup for unstructured search over O($N$) possibilities. While the theoretical speedup from O($N$) to O($\sqrt{N}$) is well-established, understanding the practical feasibility of this advantage requires careful analysis of both the algorithm's internal mechanics and the resource constraints of classical simulation.
+
+This project aims to bridge theory and practice by implementing a complete classical simulation of Grover's algorithm and conducting empirical performance analysis across multiple computing architectures. Our objectives were threefold: (1) to fully understand the mathematical and geometric structure of Grover's algorithm, (2) to measure where classical simulation becomes infeasible, and (3) to evaluate how different hardware platforms (CPU, GPU, HPC) handle the exponential growth inherent to quantum simulation.
+
+We implemented the algorithm using Qiskit Aer's statevector backend, conducted reproducible experiments measuring execution time and memory consumption, and compared performance across local CPUs, GPUs, and university HPC clusters. Our findings demonstrate that while Grover does indeed achieve quadratic speedup in query complexity, classical simulation quickly becomes memory-bound, limiting practical verification to roughly 28--32 qubits depending on the platform.
+
+\section{Implementation and Methodology}
+
+\subsection{Grover's Algorithm Core}
+
+We implemented a complete Grover search circuit with:
+\begin{itemize}
+  \item \textbf{Oracle construction}: Phase flip targeting a single basis state, implemented using controlled gates
+  \item \textbf{Diffusion operator}: The 2D reflection $D = 2|s\rangle\langle s| - I$ using Hadamard, X, and controlled-Z gates
+  \item \textbf{Adaptive iteration count}: $k = \lfloor \frac{\pi}{4}\sqrt{N} \rfloor$ for $N = 2^n$
+  \item \textbf{Measurement and post-processing}: Full statevector simulation with outcome statistics
+\end{itemize}
+
+The implementation used Qiskit Aer's statevector simulator, which classically maintains all $2^n$ amplitudes. This choice is deliberate: statevector simulation is the only method that gives exact results for small $n$, allowing direct comparison with theory. Memory consumption was tracked using OS-level RSS sampling to capture true simulator memory use, not just Python allocations.
+
+\subsection{Experimental Design}
+
+We conducted five core experiments:
+
+\begin{enumerate}
+  \item \textbf{Scalability sweep} ($n = 2$ to $n = 20$): Measure time and memory as a function of qubit count
+  \item \textbf{Iteration sweep} ($n=5$, $k$ varied): Confirm sinusoidal success probability curve and optimal iteration count
+  \item \textbf{Query complexity} ($n=1$ to $n=17$): Compare classical and Grover query counts
+  \item \textbf{Circuit depth analysis} ($n=2$ to $n=15$): Measure circuit depth and gate count scaling
+  \item \textbf{Infrastructure comparison} (CPU, GPU, HPC): Evaluate performance across platforms on large instances
+\end{enumerate}
+
+All experiments were automated and results saved to CSV for reproducibility.
+
+\section{Results}
+
+\subsection{Scalability and Memory Constraints}
+
+Local CPU simulations reached $n=20$ within 8 seconds, but memory consumption grew exponentially:
+\begin{itemize}
+  \item $n=10$: 0.24 MB, 0.004 s
+  \item $n=15$: 8.38 MB, 0.128 s
+  \item $n=20$: 54.07 MB, 7.76 s
+\end{itemize}
+
+The theoretical statevector size is $(2^n \times 16)$ bytes (16 bytes per complex amplitude). Our measurements closely matched this, confirming that memory is entirely dominated by the state representation. Beyond $n=20$, local memory constraints prevented further testing.
+
+\subsection{Iteration Count and Success Probability}
+
+The iteration sweep fixed $n=5$ and varied $k$ from 1 to 15. Results confirmed the theoretical prediction:
+\begin{itemize}
+  \item Optimal iterations: $k_{\text{opt}} = 4$
+  \item Peak success probability: 99.95\% (theoretical: 99.92\%)
+  \item Overshoot observed: $P(\text{success})$ drops to 1.8\% at $k=8$ and recovers to 82\% at $k=15$
+\end{itemize}
+
+This behavior validates the geometric picture of Grover: the quantum state rotates in a 2D subspace, and success probability follows the sinusoidal curve $P = \sin^2((2k+1)\theta)$, where $\sin(\theta) = 1/\sqrt{N}$.
+
+\subsection{Query Complexity: Grover vs.~Classical Search}
+
+For unstructured search over $N = 2^n$ items:
+\begin{itemize}
+  \item Classical expected: $N/2$ queries
+  \item Grover: $\lfloor \frac{\pi}{4}\sqrt{N} \rfloor$ queries
+  \item Observed speedup: $n=5$: 2.83×, $n=10$: 20.48×, $n=17$: 230.76×
+\end{itemize}
+
+The speedup is clearly quadratic, not exponential. For large $n$, the advantage is substantial: searching $2^{28} \approx 268$ million items would require 134 million classical queries but only 8,192 Grover queries.
+
+\subsection{Circuit Depth Analysis}
+
+Circuit depth grew superlinearly with qubit count:
+\begin{itemize}
+  \item $n=5$: depth 98, gates 186
+  \item $n=10$: depth 354, gates 1458
+  \item $n=15$: depth 1706, gates 13662
+\end{itemize}
+
+This is significant for real quantum hardware, where deeper circuits accumulate noise. Our simulations ignore noise, but physical realizations would face severe depth constraints.
+
+\section{Infrastructure Comparison: CPU, GPU, and HPC}
+
+\subsection{Local GPU Performance}
+
+Our local machine featured an NVIDIA GPU. GPU acceleration showed a clear crossover effect:
+\begin{itemize}
+  \item $n \leq 10$: CPU faster (no initialization overhead)
+  \item $n = 14$: GPU crossover point
+  \item $n = 20$: GPU 1.5× faster
+  \item $n = 23$: GPU 3.5× faster
+\end{itemize}
+
+The GPU advantage grows as the statevector size increases, amortizing initialization and memory transfer costs.
+
+\subsection{HPC CPU Scaling (AION Cluster)}
+
+The university's AION CPU cluster was used for large-scale runs:
+\begin{itemize}
+  \item $n=20$: 8.40 s
+  \item $n=24$: 134.7 s
+  \item $n=28$: 49,000 s (13.6 hours)
+  \item $n=29$: simulation stopped (memory approaching cluster node limit)
+\end{itemize}
+
+CPU-only HPC runs exhausted available memory around $n=29$.
+
+\subsection{HPC GPU Performance (IRIS Cluster with Tesla V100)}
+
+The IRIS GPU cluster provided 32 GB V100 GPUs, enabling larger simulations:
+\begin{itemize}
+  \item $n=20$: 3.07 s (2.7× faster than CPU)
+  \item $n=24$: 12.1 s (11.1× faster)
+  \item $n=28$: 4,010 s (12.2× faster)
+  \item $n=31$: 93,411 s (GPU with larger memory)
+  \item $n=32$: Out of memory (GPU limit reached)
+\end{itemize}
+
+GPU advantage accelerates with qubit count, reaching roughly 12× speedup for large instances. However, the 32 GB V100 memory ceiling was hit at $n=32$, corresponding to approximately 32 GB of statevector data.
+
+\section{Analysis and Discussion}
+
+\subsection{Why GPU Outperforms CPU}
+
+GPU acceleration is effective because:
+\begin{enumerate}
+  \item \textbf{Massive parallelism}: GPU matrix operations can parallelize across thousands of cores, while CPU is limited to a few dozen threads
+  \item \textbf{Memory bandwidth}: GPU memory bandwidth (900 GB/s on V100) vastly exceeds CPU bandwidth (~100 GB/s)
+  \item \textbf{Amortization of overhead}: For large statevectors ($n > 14$), initialization and transfer costs become negligible
+\end{enumerate}
+
+\subsection{Why the Memory Wall Cannot Be Avoided}
+
+Both CPU and GPU hit the same fundamental limit: statevector simulation requires storing $2^n$ complex amplitudes. This cannot be optimized away:
+\begin{itemize}
+  \item $n=32$: ~17 billion amplitudes, $\approx 272$ GB
+  \item Doubling $n$ increases memory by $4\times$
+\end{itemize}
+
+No algorithmic or architectural change can remove this exponential growth. Alternative simulation methods (e.g., stabilizer, tensor network) can handle special cases, but general unstructured search requires full state representation.
+
+\subsection{Practical Implications for Quantum Advantage}
+
+Our results clarify why classical simulation is a poor proxy for demonstrating quantum advantage:
+\begin{enumerate}
+  \item Grover's quadratic speedup is real in the query-complexity metric
+  \item But in wall-clock time, classical simulation outperforms Grover for $n \leq 20$ due to algorithm overhead and classical implementation efficiency
+  \item For $n > 25$, Grover becomes \emph{tractable to simulate} but \emph{slower than classical search} simply because simulating it is itself exponentially hard
+  \item True quantum advantage would require actual quantum hardware where superposition and entanglement are native operations, not simulated
+\end{enumerate}
+
+\section{Conclusion}
+
+This project successfully implemented a complete classical simulation of Grover's algorithm and conducted extensive performance characterization across CPU, GPU, and HPC platforms. Our experiments confirmed the theoretical quadratic speedup in query complexity, demonstrated the sinusoidal overshoot behavior of Grover iterations, and measured the practical limits of classical simulation.
+
+The primary finding is that memory growth of the statevector representation is the fundamental bottleneck, limiting CPU simulation to $\sim 29$ qubits and GPU simulation to $\sim 32$ qubits. GPU acceleration provided consistent 12× speedup on large instances, but did not remove the exponential wall—only delayed it.
+
+These results underline an important principle: classical simulation is not a good testbed for quantum advantage. Grover is faster in query counts, but simulating Grover is itself classically hard. Demonstrating true quantum advantage requires quantum hardware where the speedup manifests in real execution time, not in simulated metrics.
+
+\begin{thebibliography}{99}
+
+\bibitem{Grover1996} Lov K. Grover. A fast quantum mechanical algorithm for database search. \textit{Proceedings of the 28th ACM Symposium on the Theory of Computing}, pages 212--219, 1996.
+
+\bibitem{Qiskit} Gheorghiu, A., et al. (IBM). Qiskit: An open-source framework for quantum computing. \textit{https://qiskit.org}
+
+\end{thebibliography}
+
+\end{document}
