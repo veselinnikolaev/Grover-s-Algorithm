@@ -24,7 +24,8 @@ from math import pi, sqrt, floor, log2
 import os, warnings
 
 warnings.filterwarnings("ignore")
-os.makedirs("figures", exist_ok=True)
+os.makedirs("figures/png", exist_ok=True)
+os.makedirs("figures/pdf", exist_ok=True)
 
 plt.rcParams.update({
     "font.family": "serif",
@@ -67,6 +68,13 @@ def _fmt_time(s):
     if s >= 60:
         return f"{s/60:.1f} min"
     return f"{s:.2f} s"
+
+
+def _save(fig, name):
+    """Save figure to both figures/pdf/ and figures/png/ subfolders."""
+    fig.savefig(f"figures/pdf/{name}.pdf", bbox_inches="tight")
+    fig.savefig(f"figures/png/{name}.png", bbox_inches="tight")
+    print(f"  Saved: figures/pdf/{name}.pdf  |  figures/png/{name}.png")
 
 
 def _load_hpc_gpu():
@@ -131,9 +139,7 @@ def plot_scalability():
     ax.legend(fontsize=9)
 
     plt.tight_layout()
-    fig.savefig("figures/fig1_scalability.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig1_scalability.png", bbox_inches="tight")
-    print("  Saved: figures/fig1_scalability.{pdf,png}")
+    _save(fig, "fig1_scalability")
     plt.close()
 
 
@@ -176,9 +182,7 @@ def plot_iteration_sweep():
     ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
-    fig.savefig("figures/fig2_iteration_sweep.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig2_iteration_sweep.png", bbox_inches="tight")
-    print("  Saved: figures/fig2_iteration_sweep.{pdf,png}")
+    _save(fig, "fig2_iteration_sweep")
     plt.close()
 
 
@@ -222,9 +226,7 @@ def plot_classical_comparison():
     axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
-    fig.savefig("figures/fig3_speedup.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig3_speedup.png", bbox_inches="tight")
-    print("  Saved: figures/fig3_speedup.{pdf,png}")
+    _save(fig, "fig3_speedup")
     plt.close()
 
 
@@ -261,9 +263,7 @@ def plot_circuit_depth():
     axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
-    fig.savefig("figures/fig4_circuit_depth.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig4_circuit_depth.png", bbox_inches="tight")
-    print("  Saved: figures/fig4_circuit_depth.{pdf,png}")
+    _save(fig, "fig4_circuit_depth")
     plt.close()
 
 
@@ -307,9 +307,7 @@ def plot_gpu_comparison():
         ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    fig.savefig("figures/fig5_gpu.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig5_gpu.png", bbox_inches="tight")
-    print("  Saved: figures/fig5_gpu.{pdf,png}")
+    _save(fig, "fig5_gpu")
     plt.close()
 
 
@@ -328,8 +326,6 @@ def plot_hpc_dashboard(gpu, cpu):
     ax = axes[0]
     ax.semilogy(gn, gt, "o-", color=COLORS["gpu"],  lw=2, ms=5, label="GPU")
     ax.semilogy(cn, ct, "s-", color=COLORS["cpu"],  lw=2, ms=5, label="CPU")
-    ax.semilogy(cn, ct, "--", color=COLORS["cpu"],  lw=2, ms=5, label="CPU Theory")
-    ax.semilogy(gn, gt, "--", color=COLORS["gpu"],  lw=2, ms=5, label="GPU Theory")
     ga, gb = _exp_fit(gn, gt)
     ca, cb = _exp_fit(cn, ct)
     ax.semilogy(np.linspace(gn[0], gn[-1], 200),
@@ -380,9 +376,7 @@ def plot_hpc_dashboard(gpu, cpu):
     ax.set_ylim(0, max(speedups) * 1.25)
 
     plt.tight_layout()
-    fig.savefig("figures/fig6_hpc.pdf", bbox_inches="tight")
-    fig.savefig("figures/fig6_hpc.png", bbox_inches="tight")
-    print("  Saved: figures/fig6_hpc.{pdf,png}")
+    _save(fig, "fig6_hpc")
     plt.close()
 
 
@@ -409,4 +403,4 @@ if __name__ == "__main__":
     if hpc_gpu is not None and hpc_cpu is not None:
         plot_hpc_dashboard(hpc_gpu, hpc_cpu)
 
-    print("\nAll figures saved in ./figures/")
+    print("\nAll figures saved in ./figures/pdf/ and ./figures/png/")
