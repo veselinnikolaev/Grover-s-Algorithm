@@ -47,7 +47,7 @@ grover-s-algorithm/
     ├── fig3_speedup.png/pdf
     ├── fig4_circuit_depth.png/pdf
     ├── fig5_gpu.png/pdf
-    └── fig6_hpc_dashboard.png/pdf
+    └── fig6_hpc.png/pdf
 ```
 
 ---
