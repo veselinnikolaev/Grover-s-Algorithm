@@ -16,11 +16,33 @@ import pandas as pd
 import os
 import warnings
 
+from qiskit import transpile
+from qiskit.transpiler.passes import RemoveBarriers
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 os.makedirs("results", exist_ok=True)
 
 from grover_core import build_grover_circuit
 from tn_metrics import rehearse_amplitude
+
+
+def _prepare_for_quimb(qc):
+    """
+    quimb/qiskit-quimb only understands elementary gates. Grover's oracle
+    and diffuser use mcx (arbitrary-arity multi-controlled X), which Aer
+    handles natively but qiskit-quimb's converter doesn't recognize.
+    Transpiling to a standard universal basis decomposes mcx recursively
+    into single/two-qubit gates quimb can ingest. Barriers are also
+    stripped since they carry no contraction meaning.
+
+    Note: this decomposition is itself meaningful, not just a workaround —
+    it's the same gate-count blowup a real TN/hardware backend would face
+    for mcx, so it's fair to include it in the cost measurement rather
+    than treat it as noise.
+    """
+    qc_no_barriers = RemoveBarriers()(qc)
+    return transpile(qc_no_barriers, basis_gates=["rz", "sx", "x", "cx"],
+                      optimization_level=1)
 
 
 def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
@@ -33,6 +55,7 @@ def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
         target = np.random.randint(0, 2**n)
         qc = build_grover_circuit(n, target)
         qc.remove_final_measurements(inplace=True)  # quimb wants amplitudes, not shots
+        qc = _prepare_for_quimb(qc)
 
         target_bitstring = format(target, f"0{n}b")
 
