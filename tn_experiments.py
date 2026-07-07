@@ -1,0 +1,55 @@
+"""
+tn_experiments.py
+==================
+Tensor network scalability sweep for Grover's algorithm, built on top of
+grover_core.py's circuit constructor. Companion to experiments.py's
+experiment_scalability(), but reporting quimb's contraction width (W) and
+cost (C) instead of shot-based success probability — these are the
+quantities directly comparable to BSP2's measured memory/time.
+
+Run:
+    python tn_experiments.py
+"""
+
+import numpy as np
+import pandas as pd
+import os
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+os.makedirs("results", exist_ok=True)
+
+from grover_core import build_grover_circuit
+from tn_metrics import rehearse_amplitude
+
+
+def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
+    print("\n" + "="*60)
+    print("  TN EXPERIMENT: Contraction width (W) & cost (C) vs qubits")
+    print("="*60)
+
+    records = []
+    for n in qubit_range:
+        target = np.random.randint(0, 2**n)
+        qc = build_grover_circuit(n, target)
+        qc.remove_final_measurements(inplace=True)  # quimb wants amplitudes, not shots
+
+        target_bitstring = format(target, f"0{n}b")
+
+        print(f"n={n:2d}: ", end="", flush=True)
+        try:
+            stats = rehearse_amplitude(qc, target_bitstring, verbose=verbose)
+            stats.update({"n_qubits": n, "N": 2**n, "target": target})
+            records.append(stats)
+        except Exception as e:
+            print(f"Error — {e}")
+            break
+
+    df = pd.DataFrame(records)
+    df.to_csv("results/tn_scalability.csv", index=False)
+    print(f"\n  Saved: results/tn_scalability.csv  ({len(df)} rows)")
+    return df
+
+
+if __name__ == "__main__":
+    experiment_tn_scalability(qubit_range=range(2, 34))
