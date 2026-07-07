@@ -8,5 +8,6 @@ matplotlib>=3.7.0
 
 quimb
 cotengra
+kahypar
 qiskit-quimb
 psutil>=5.9.0
