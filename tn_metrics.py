@@ -70,7 +70,6 @@ def rehearse_amplitude(qc, target_bitstring, optimize=None, verbose=True,
         optimize = _make_optimizer(max_time=max_time, max_repeats=max_repeats)
 
     circ = quimb_circuit(qc)
-    print(f"    [debug] circ.N={circ.N}, circ.num_gates={circ.num_gates}, id(circ)={id(circ)}")
 
     t0 = time.perf_counter()
 
