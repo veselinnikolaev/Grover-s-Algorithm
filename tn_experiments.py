@@ -59,6 +59,7 @@ def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
         qc.remove_final_measurements(inplace=True)
         qc = _prepare_for_quimb(qc)
 
+        print(f"    [debug] qc.num_qubits={qc.num_qubits}, qc.size()={qc.size()}")
         target_bitstring = format(target, f"0{n}b")
 
         print(f"n={n:2d}: ", end="", flush=True)

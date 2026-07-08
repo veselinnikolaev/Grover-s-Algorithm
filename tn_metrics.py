@@ -33,11 +33,16 @@ import cotengra as ctg
 from qiskit_quimb import quimb_circuit
 
 
-def _make_optimizer(max_time=30, max_repeats=32):
+def _make_optimizer(max_time=10, max_repeats=8):
     """
     Bounded cotengra optimizer. Tries kahypar-based partitioning if
     available (best quality trees), falls back to greedy otherwise so
     the sweep still runs on machines without kahypar installed.
+
+    max_time/max_repeats kept small and identical across all n so that
+    the sweep gives a comparable, bounded estimate at every qubit count
+    rather than an unbounded best-effort search that gets slower as the
+    decomposed circuit grows.
     """
     return ctg.HyperOptimizer(
         methods=["greedy", "kahypar"],
