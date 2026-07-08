@@ -50,8 +50,6 @@ def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
     print("  TN EXPERIMENT: Contraction width (W) & cost (C) vs qubits")
     print("="*60)
 
-    optimizer = _make_optimizer()  # built once, reused across the whole sweep
-
     records = []
     for n in qubit_range:
         target = np.random.randint(0, 2**n)
@@ -59,8 +57,8 @@ def experiment_tn_scalability(qubit_range=range(2, 34), verbose=True):
         qc.remove_final_measurements(inplace=True)
         qc = _prepare_for_quimb(qc)
 
-        print(f"    [debug] qc.num_qubits={qc.num_qubits}, qc.size()={qc.size()}")
         target_bitstring = format(target, f"0{n}b")
+        optimizer = _make_optimizer()
 
         print(f"n={n:2d}: ", end="", flush=True)
         try:
