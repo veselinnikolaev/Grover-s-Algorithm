@@ -55,11 +55,43 @@ def _make_optimizer(max_time=10, max_repeats=8):
     the sweep gives a comparable, bounded estimate at every qubit count
     rather than an unbounded best-effort search that gets slower as the
     decomposed circuit grows.
+
+    CAVEAT (confirmed empirically): max_time/max_repeats bound the
+    search's TOTAL BUDGET across repeated trials, but not the cost of a
+    SINGLE trial. As the mcx-decomposed circuit grows with n, each
+    individual trial's cost-evaluation itself gets slower, so past some
+    n the cap stops being effective — observed roughly 4x growth per
+    qubit from n=6 to n=11 (5.6s -> 1044s), which would put n=20+ at
+    days, not seconds. For a wide sweep (e.g. up to n=33), use
+    _make_greedy_optimizer() below instead.
     """
     return ctg.HyperOptimizer(
         methods=["greedy", "kahypar"],
         max_time=max_time,
         max_repeats=max_repeats,
+        progbar=False,
+    )
+
+
+def _make_greedy_optimizer():
+    """
+    Single-shot deterministic greedy optimizer — no repeated trials, no
+    search budget to blow past. Cost stays roughly proportional to
+    circuit size instead of compounding, which is what makes a full
+    n=2..33 sweep actually finishable.
+
+    Tradeoff: greedy alone typically finds a WORSE (higher W/C) tree than
+    HyperOptimizer's best-of-many-trials search would. This is a
+    real methodological tradeoff worth stating explicitly in a report:
+    the reported W/C with this optimizer are upper bounds on the true
+    cost, not the best achievable estimate — use _make_optimizer() (the
+    bounded multi-trial search) for smaller n where its cost is still
+    affordable, and this for the wide sweep where it isn't.
+    """
+    return ctg.HyperOptimizer(
+        methods=["greedy"],
+        max_repeats=1,
+        max_time=5,
         progbar=False,
     )
 
@@ -123,22 +155,32 @@ def measure_real_contraction(qc, target_bitstring, optimize=None, verbose=True):
       - tracemalloc: tracks Python-allocator memory (numpy arrays go
         through this on most builds, but C-level buffers outside
         Python's allocator can be undercounted).
-      - psutil RSS delta: tracks total process memory, a coarser but
-        more trustworthy real-world number.
+      - resource.getrusage ru_maxrss: the process's PEAK resident set
+        size over its ENTIRE lifetime so far, in KB on Linux. Used
+        instead of a psutil before/after RSS delta, because a delta
+        undercounts in a long-lived process: once the allocator has
+        grown the process once (e.g. a big earlier n), it often reuses
+        those already-mapped pages for later smaller allocations instead
+        of requesting fresh memory from the OS, making rss_after -
+        rss_before read as ~0 even though real memory was used. ru_maxrss
+        is monotonically non-decreasing and doesn't have this problem —
+        but note it's a LIFETIME peak, not this call's peak alone, so
+        run each n in its own fresh subprocess if you need a clean
+        per-n number rather than a running high-water mark.
 
-    Only run this for small/moderate n (start around n<=16-18) — unlike
-    rehearse_amplitude, this really executes the contraction, so it pays
-    the full cost the rehearsal is designed to let you avoid.
+    Only run this for small/moderate n where the REHEARSED W is small
+    (roughly W<30) — unlike rehearse_amplitude, this really executes the
+    contraction and pays the full 2^W-element cost; a large rehearsed W
+    means this will exhaust memory (see the n=10 case where W=50 implied
+    ~18 PB and the process was OOM-killed — that's not a bug, the real
+    contraction genuinely needs that much memory).
     """
-    import psutil
+    import resource
 
     if optimize is None:
         optimize = _make_optimizer()
 
     circ = quimb_circuit(qc)
-
-    proc = psutil.Process(os.getpid())
-    rss_before = proc.memory_info().rss
 
     tracemalloc.start()
     t0 = time.perf_counter()
@@ -147,16 +189,18 @@ def measure_real_contraction(qc, target_bitstring, optimize=None, verbose=True):
     _, tracemalloc_peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    rss_after = proc.memory_info().rss
+    # ru_maxrss is in KB on Linux (bytes on macOS) — this codebase
+    # targets WSL/Linux, so KB is assumed here
+    peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
     stats = {
         "amplitude_real_part": amp.real if hasattr(amp, "real") else amp,
         "real_time_s": elapsed,
         "tracemalloc_peak_mb": tracemalloc_peak / (1024 ** 2),
-        "psutil_rss_delta_mb": (rss_after - rss_before) / (1024 ** 2),
+        "peak_rss_mb_lifetime": peak_rss_mb,
     }
     if verbose:
         print(f"    [real] time={elapsed:.3f}s  "
               f"tracemalloc_peak={stats['tracemalloc_peak_mb']:.2f}MB  "
-              f"rss_delta={stats['psutil_rss_delta_mb']:.2f}MB")
+              f"peak_rss(lifetime)={stats['peak_rss_mb_lifetime']:.2f}MB")
     return stats

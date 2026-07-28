@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 os.makedirs("results", exist_ok=True)
 
 from grover_core import build_grover_circuit
-from tn_metrics import rehearse_amplitude, measure_real_contraction, _make_optimizer
+from tn_metrics import rehearse_amplitude, measure_real_contraction, _make_optimizer, _make_greedy_optimizer
 
 
 def _prepare_for_quimb(qc):
@@ -71,23 +71,23 @@ def _tn_bytes_estimate(W):
     return 16 * (2 ** W)
 
 
-def experiment_tn_scalability(qubit_range=range(2, 14), verbose=True, use_greedy=False):
+def experiment_tn_scalability(qubit_range=range(2, 12), verbose=True, use_greedy=False,
+                               n_search_repeats=3, repeats_above_n=9):
     """
-    use_greedy defaults to False now: greedy-only (max_repeats=1) was
-    tested and produced unstable, sometimes-nonsensical trees (e.g.
-    W=45 at n=7, W=325 at n=11 — both far exceeding even the full
-    statevector size for that n), while barely improving wall time.
-    The bounded multi-trial search (_make_optimizer) gives consistently
-    sane W/C values and is kept as the default despite being slower.
+    n_search_repeats / repeats_above_n: HyperOptimizer's search is
+    stochastic with no fixed seed, and running it n_search_repeats times
+    to find the minimum W gets expensive fast — the previous single-pass
+    run took ~5.7 hours total, with n=13 ALONE taking ~4.4 hours. Tripling
+    that is not worth it: the finding (TN estimate exploding vs
+    statevector, already many orders of magnitude worse by n~9-11) is
+    already decisive well before n=13, so squeezing a cleaner number out
+    of the most expensive points doesn't change the conclusion.
 
-    qubit_range now defaults to 2..13, not 2..33: empirically, wall
-    time grows roughly ~4x per qubit past n~8 regardless of optimizer
-    choice, pointing to a structural bottleneck (gate-count blowup from
-    the mcx decomposition on this highly-entangling circuit), not a
-    tunable search parameter. Treat the reached ceiling itself as a
-    reportable finding — "exact TN contraction became impractical
-    beyond n~X" is a legitimate answer to research question 1, not a
-    failure to fix further.
+    qubit_range now capped at 2..11, not 2..13 — n=12/13 dominated total
+    time for marginal additional insight. Repeats (for reliability against
+    search-luck noise) only apply at or below repeats_above_n=9, where
+    each search is still cheap (seconds, not minutes/hours); above that,
+    a single run is used to keep total wall time reasonable.
     """
     print("\n" + "=" * 60)
     print("  TN EXPERIMENT: Contraction width (W) & cost (C) vs qubits")
@@ -97,17 +97,27 @@ def experiment_tn_scalability(qubit_range=range(2, 14), verbose=True, use_greedy
     records = []
     errors = []
     for n in qubit_range:
-        target = np.random.randint(0, 2 ** n)
+        target = 0  # fixed, not random — avoids confounding growth-with-n with target-dependent noise
         qc = build_grover_circuit(n, target)
         qc.remove_final_measurements(inplace=True)
         qc = _prepare_for_quimb(qc)
 
         target_bitstring = format(target, f"0{n}b")
-        optimizer = _make_greedy_optimizer() if use_greedy else _make_optimizer()
 
         print(f"n={n:2d}: ", end="", flush=True)
         try:
-            stats = rehearse_amplitude(qc, target_bitstring, optimize=optimizer, verbose=verbose)
+            reps = n_search_repeats if n <= repeats_above_n else 1
+            best_stats = None
+            for rep in range(reps):
+                optimizer = _make_greedy_optimizer() if use_greedy else _make_optimizer()
+                trial_stats = rehearse_amplitude(qc, target_bitstring, optimize=optimizer,
+                                                  verbose=False)
+                if best_stats is None or trial_stats["contraction_width_W"] < best_stats["contraction_width_W"]:
+                    best_stats = trial_stats
+            stats = best_stats
+            if verbose:
+                print(f"    best-of-{reps}: W={stats['contraction_width_W']:.2f}  "
+                      f"C={stats['contraction_cost_C']:.2f}")
             sv_bytes = _statevector_bytes(n)
             tn_bytes = _tn_bytes_estimate(stats["contraction_width_W"])
             stats.update({
@@ -119,6 +129,7 @@ def experiment_tn_scalability(qubit_range=range(2, 14), verbose=True, use_greedy
                 "statevector_bytes": sv_bytes,
                 "tn_bytes_estimate": tn_bytes,
                 "tn_advantage": tn_bytes < sv_bytes,
+                "search_repeats_used": reps,
             })
             records.append(stats)
 
@@ -140,13 +151,24 @@ def experiment_tn_scalability(qubit_range=range(2, 14), verbose=True, use_greedy
     if errors:
         print(f"  {len(errors)} qubit count(s) failed — see results/tn_scalability_errors.csv")
 
-    if not df.empty and df["tn_advantage"].any():
-        crossover_n = int(df.loc[df["tn_advantage"], "n_qubits"].min())
-        print(f"  >> Estimated crossover: TN becomes memory-favorable at n={crossover_n}")
-    elif not df.empty:
-        print("  >> No crossover found in this range — TN did not beat statevector "
-              "memory here (a legitimate, reportable result given Grover's "
-              "oracle is a highly entangling circuit).")
+    if not df.empty:
+        # A single early n where tn_bytes happens to be smaller (e.g. at
+        # trivial n=2/3, both values are tiny and this is noise, not a
+        # real advantage) doesn't mean TN "wins" — it needs to hold for
+        # n and everything larger to count as a genuine crossover.
+        df_sorted = df.sort_values("n_qubits").reset_index(drop=True)
+        sustained_from = None
+        for i in range(len(df_sorted)):
+            if df_sorted["tn_advantage"].iloc[i:].all():
+                sustained_from = int(df_sorted["n_qubits"].iloc[i])
+                break
+
+        if sustained_from is not None:
+            print(f"  >> Sustained crossover: TN stays memory-favorable from n={sustained_from} onward")
+        else:
+            print("  >> No SUSTAINED crossover found — any early n where TN looked smaller "
+                  "didn't hold as n grew further (a legitimate, reportable result given "
+                  "Grover's oracle is a highly entangling circuit).")
 
     return df
 
@@ -168,7 +190,7 @@ def experiment_real_memory_validation(qubit_range=range(2, 16), verbose=True):
 
     records = []
     for n in qubit_range:
-        target = np.random.randint(0, 2 ** n)
+        target = 0  # fixed, not random — same reasoning as the main sweep above
         qc = build_grover_circuit(n, target)
         qc.remove_final_measurements(inplace=True)
         qc = _prepare_for_quimb(qc)
@@ -176,14 +198,39 @@ def experiment_real_memory_validation(qubit_range=range(2, 16), verbose=True):
 
         print(f"n={n:2d}: ", end="", flush=True)
         try:
-            rehearsed = rehearse_amplitude(qc, target_bitstring,
-                                            optimize=_make_optimizer(), verbose=False)
+            # Rehearse with a few independent trials first, keep the
+            # optimizer instance that found the SMALLEST W. Passing a
+            # fresh independent optimizer to measure_real_contraction
+            # (as before) let it gamble on its own unlucky search —
+            # that's what actually caused the n=8 OOM kill: the rehearsal
+            # found W=11 (safe), but a separate fresh search for the real
+            # run could land on a far worse tree. Reusing the same
+            # optimizer object relies on cotengra caching its best path
+            # for that circuit — verify this holds on your version; if
+            # W ends up different real vs rehearsed, that assumption
+            # didn't hold and needs a different fix.
+            best_rehearsed, best_optimizer = None, None
+            for _ in range(3):
+                opt = _make_optimizer()
+                trial = rehearse_amplitude(qc, target_bitstring, optimize=opt, verbose=False)
+                if best_rehearsed is None or trial["contraction_width_W"] < best_rehearsed["contraction_width_W"]:
+                    best_rehearsed, best_optimizer = trial, opt
+
+            # Safety check: don't attempt real execution if even the best
+            # rehearsed W implies infeasible memory (this is what should
+            # have stopped the n=10 case before it ever reached OOM).
+            W = best_rehearsed["contraction_width_W"]
+            if _tn_bytes_estimate(W) > 2 * (1024 ** 3):  # >2 GB estimated
+                print(f"skipped — best rehearsed W={W:.1f} implies "
+                      f"{_tn_bytes_estimate(W)/(1024**3):.1f} GB, too large to safely execute")
+                continue
+
             real = measure_real_contraction(qc, target_bitstring,
-                                             optimize=_make_optimizer(), verbose=verbose)
+                                             optimize=best_optimizer, verbose=verbose)
             real.update({
                 "n_qubits": n,
-                "rehearsed_W": rehearsed["contraction_width_W"],
-                "rehearsed_tn_bytes_estimate": _tn_bytes_estimate(rehearsed["contraction_width_W"]),
+                "rehearsed_W": best_rehearsed["contraction_width_W"],
+                "rehearsed_tn_bytes_estimate": _tn_bytes_estimate(best_rehearsed["contraction_width_W"]),
             })
             records.append(real)
         except Exception as e:
@@ -197,5 +244,9 @@ def experiment_real_memory_validation(qubit_range=range(2, 16), verbose=True):
 
 
 if __name__ == "__main__":
-    experiment_tn_scalability(qubit_range=range(2, 14))
-    experiment_real_memory_validation(qubit_range=range(2, 14))
+    experiment_tn_scalability(qubit_range=range(2, 12))
+    # Capped below n=10 deliberately: n=10's rehearsed W came out at 50,
+    # meaning a real contraction there needs ~2^50*16 bytes (~18 PB) —
+    # genuinely infeasible on any machine, not a resource limit to raise.
+    # Real execution should only be attempted where rehearsed W is small.
+    experiment_real_memory_validation(qubit_range=range(2, 10))

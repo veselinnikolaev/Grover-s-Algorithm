@@ -15,10 +15,10 @@ Figures produced
   fig5_gpu                — CPU vs GPU comparison (gpu_comparison.csv)
   fig6_hpc                — HPC: 3-panel combined dashboard (GPU vs CPU)
   fig7_tn_crossover       — Statevector vs TN memory crossover (results/tn_scalability.csv)
-  fig8_bond_threshold     — Min bond dimension (χ) for exact convergence vs n
-  fig9_bond_convergence   — Error vs χ convergence curve, for the last n in the sweep
+  fig7_tn_crossover       — Statevector vs TN memory scaling (results/tn_scalability.csv)
   fig8_bond_threshold     — Min chi needed for exact convergence vs n (results/tn_bond_dimension_threshold.csv)
   fig9_bond_convergence   — Amplitude/error vs chi for one n (results/tn_bond_dimension_scaling_n{5-11}_t{target}.csv)
+  fig10_rehearsed_vs_real — Rehearsed W-estimate vs actually measured memory (results/tn_real_memory_validation.csv)
 """
 
 import pandas as pd
@@ -403,21 +403,49 @@ def plot_tn_crossover():
     n = df["n_qubits"].values
     ax.semilogy(n, df["statevector_bytes"], "o-", color=COLORS["classical"],
                 lw=2, ms=5, label="Statevector (16·2ⁿ bytes)")
-    ax.semilogy(n, df["tn_bytes_estimate"], "s-", color=COLORS["quantum"],
-                lw=2, ms=5, label="TN estimate (16·2^W bytes)")
+
+    if "search_repeats_used" in df.columns:
+        denoised = df[df["search_repeats_used"] > 1].sort_values("n_qubits")
+        single_run = df[df["search_repeats_used"] == 1].sort_values("n_qubits")
+        # full line (all points) drawn faint first so the connection
+        # between denoised and single-run segments is still visible
+        ax.semilogy(df.sort_values("n_qubits")["n_qubits"], df.sort_values("n_qubits")["tn_bytes_estimate"],
+                    "-", color=COLORS["quantum"], lw=1, alpha=0.4)
+        ax.semilogy(denoised["n_qubits"], denoised["tn_bytes_estimate"], "s",
+                    color=COLORS["quantum"], ms=6, label="TN estimate, de-noised (best-of-3+)")
+        if not single_run.empty:
+            ax.semilogy(single_run["n_qubits"], single_run["tn_bytes_estimate"], "s",
+                        color=COLORS["quantum"], ms=9, markerfacecolor="none", markeredgewidth=2,
+                        label="TN estimate, single-run (lower confidence)")
+    else:
+        # older CSV without the repeats column — fall back to a plain
+        # line, no confidence distinction available
+        ax.semilogy(n, df["tn_bytes_estimate"], "s-", color=COLORS["quantum"],
+                    lw=2, ms=5, label="TN estimate (16·2^W bytes)")
+
     ax.set_xlabel("Number of qubits  n")
     ax.set_ylabel("Memory (bytes, log scale)")
-    ax.legend()
+    ax.legend(fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
 
-    if df["tn_advantage"].any():
-        crossover_n = int(df.loc[df["tn_advantage"], "n_qubits"].min())
-        ax.axvline(crossover_n, color=COLORS["accent"], ls="--", lw=1.5)
-        ax.text(crossover_n, ax.get_ylim()[1], f" crossover n={crossover_n}",
+    df_sorted = df.sort_values("n_qubits").reset_index(drop=True)
+    sustained_from = None
+    for i in range(len(df_sorted)):
+        if df_sorted["tn_advantage"].iloc[i:].all():
+            sustained_from = int(df_sorted["n_qubits"].iloc[i])
+            break
+
+    if sustained_from is not None:
+        ax.axvline(sustained_from, color=COLORS["accent"], ls="--", lw=1.5)
+        ax.text(sustained_from, ax.get_ylim()[1], f" crossover n={sustained_from}",
                 color=COLORS["accent"], va="top", fontsize=9)
-        note = f"TN becomes memory-favorable at n={crossover_n}."
+        note = f"TN stays memory-favorable from n={sustained_from} onward (sustained)."
     else:
-        note = "No crossover in this range — TN did not beat statevector memory here."
+        note = ("No SUSTAINED crossover in this range — any early n where TN looked\n"
+                "smaller didn't hold as n grew further.")
+    if "search_repeats_used" in df.columns and (df["search_repeats_used"] == 1).any():
+        note += ("\nHollow markers = single search run (not de-noised across repeats) —\n"
+                  "treat those specific points as order-of-magnitude, not precise.")
     ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
@@ -525,6 +553,41 @@ def plot_bond_convergence():
 
 
 # ---------------------------------------------------------------------------
+# Figure 10: rehearsed W-based estimate vs actually measured memory
+# ---------------------------------------------------------------------------
+
+def plot_rehearsed_vs_real():
+    try:
+        df = pd.read_csv("results/tn_real_memory_validation.csv")
+    except FileNotFoundError:
+        print("tn_real_memory_validation.csv not found — skipping "
+              "(run tn_experiments.py first)")
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig.suptitle("Figure 10 — Rehearsed Estimate vs Actually Measured Memory", fontweight="bold")
+
+    n = df["n_qubits"].values
+    ax.semilogy(n, df["rehearsed_tn_bytes_estimate"] / (1024 ** 2), "o-",
+                color=COLORS["theory"], lw=2, ms=6, label="Rehearsed estimate (16·2^W bytes)")
+    ax.semilogy(n, df["tracemalloc_peak_mb"], "s-",
+                color=COLORS["classical"], lw=2, ms=6, label="Measured (tracemalloc peak)")
+    ax.set_xlabel("Number of qubits  n")
+    ax.set_ylabel("Memory (MB, log scale)")
+    ax.legend(fontsize=9)
+    ax.grid(True, which="both", alpha=0.3)
+
+    note = ("W only captures the single largest intermediate tensor, not total\n"
+            "memory across the whole contraction (multiple tensors coexist, plus\n"
+            "numpy/quimb overhead) — the estimate is a lower bound, not a prediction.")
+    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8, color="gray", va="bottom")
+
+    plt.tight_layout()
+    _save(fig, "fig10_rehearsed_vs_real")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -550,5 +613,6 @@ if __name__ == "__main__":
     plot_tn_crossover()
     plot_bond_threshold()
     plot_bond_convergence()
+    plot_rehearsed_vs_real()
 
     print("\nAll figures saved in ./figures/pdf/ and ./figures/png/")
