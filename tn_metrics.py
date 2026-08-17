@@ -37,7 +37,6 @@ Recommended (much better contraction trees, especially at larger n):
     pip install kahypar
 """
 
-import os
 import time
 import tracemalloc
 
@@ -125,9 +124,6 @@ def rehearse_amplitude(qc, target_bitstring, optimize=None, verbose=True,
     circ = quimb_circuit(qc)
     t_convert = time.perf_counter() - t_convert_0
 
-    # NOTE: verify this method name once on your setup:
-    #   print([a for a in dir(circ) if 'rehearse' in a])
-    # Confirmed present as `amplitude_rehearse` as of this project's setup.
     t0 = time.perf_counter()
     info = circ.amplitude_rehearse(target_bitstring, optimize=optimize)
     t_rehearse = time.perf_counter() - t0

@@ -183,10 +183,6 @@ def plot_iteration_sweep():
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    note = (f"Key insight: over-rotating past k_opt reduces P(success).\n"
-            f"The sinusoidal pattern reflects state-vector rotation by 2θ per iteration.")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8.5, color="gray", va="bottom")
-
     plt.tight_layout()
     _save(fig, "fig2_iteration_sweep")
     plt.close()
@@ -228,9 +224,6 @@ def plot_classical_comparison():
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    note = "Note: Grover gives a quadratic speedup, not exponential.\nFor n=30 (N≈10⁹), classical≈500M queries, Grover≈25K queries."
-    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
-
     plt.tight_layout()
     _save(fig, "fig3_speedup")
     plt.close()
@@ -264,9 +257,6 @@ def plot_circuit_depth():
     ax.set_ylabel("Total gate count")
     ax.set_title("Total Gate Count (log scale)")
     ax.grid(True, alpha=0.3, which="both")
-
-    note = "On real hardware: circuit depth ∝ accumulated noise.\nThis is why quantum advantage for search is not yet demonstrated at scale."
-    axes[1].text(0.02, 0.05, note, transform=axes[1].transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
     _save(fig, "fig4_circuit_depth")
@@ -407,8 +397,6 @@ def plot_tn_crossover():
     if "search_repeats_used" in df.columns:
         denoised = df[df["search_repeats_used"] > 1].sort_values("n_qubits")
         single_run = df[df["search_repeats_used"] == 1].sort_values("n_qubits")
-        # full line (all points) drawn faint first so the connection
-        # between denoised and single-run segments is still visible
         ax.semilogy(df.sort_values("n_qubits")["n_qubits"], df.sort_values("n_qubits")["tn_bytes_estimate"],
                     "-", color=COLORS["quantum"], lw=1, alpha=0.4)
         ax.semilogy(denoised["n_qubits"], denoised["tn_bytes_estimate"], "s",
@@ -418,8 +406,6 @@ def plot_tn_crossover():
                         color=COLORS["quantum"], ms=9, markerfacecolor="none", markeredgewidth=2,
                         label="TN estimate, single-run (lower confidence)")
     else:
-        # older CSV without the repeats column — fall back to a plain
-        # line, no confidence distinction available
         ax.semilogy(n, df["tn_bytes_estimate"], "s-", color=COLORS["quantum"],
                     lw=2, ms=5, label="TN estimate (16·2^W bytes)")
 
@@ -439,14 +425,6 @@ def plot_tn_crossover():
         ax.axvline(sustained_from, color=COLORS["accent"], ls="--", lw=1.5)
         ax.text(sustained_from, ax.get_ylim()[1], f" crossover n={sustained_from}",
                 color=COLORS["accent"], va="top", fontsize=9)
-        note = f"TN stays memory-favorable from n={sustained_from} onward (sustained)."
-    else:
-        note = ("No SUSTAINED crossover in this range — any early n where TN looked\n"
-                "smaller didn't hold as n grew further.")
-    if "search_repeats_used" in df.columns and (df["search_repeats_used"] == 1).any():
-        note += ("\nHollow markers = single search run (not de-noised across repeats) —\n"
-                  "treat those specific points as order-of-magnitude, not precise.")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8.5, color="gray", va="bottom")
 
     plt.tight_layout()
     _save(fig, "fig7_tn_crossover")
@@ -482,12 +460,6 @@ def plot_bond_threshold():
     ax.legend(fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
 
-    n_targets = int(df["n_targets_tested"].iloc[0]) if "n_targets_tested" in df.columns else "?"
-    note = (f"Growth of required bond dimension with n reflects entanglement\n"
-            f"growth in Grover's oracle+diffuser structure. Each n tested against\n"
-            f"{n_targets} distinct targets — shaded band shows target-dependent spread.")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8, color="gray", va="bottom")
-
     plt.tight_layout()
     _save(fig, "fig8_bond_threshold")
     plt.close()
@@ -506,8 +478,6 @@ def plot_bond_convergence():
               "(run tn_bond_dimension_experiment.py first)")
         return
 
-    # Pick the largest n available (most interesting: closest to the
-    # entanglement threshold), and its first target.
     def _n_from_path(p):
         return int(p.split("_n")[1].split("_t")[0])
 
@@ -522,10 +492,6 @@ def plot_bond_convergence():
     fig, ax = plt.subplots(figsize=(7, 4.5))
     fig.suptitle(f"Figure 9 — Convergence vs Bond Dimension (n={n_qubits})", fontweight="bold")
 
-    # Honesty fix: don't fake extra precision with a silent +epsilon.
-    # Points that converged EXACTLY (error == 0.0) are plotted at a
-    # visually-obvious floor and marked with a different color/label,
-    # rather than looking like a real 1e-12-level measurement.
     floor = 1e-16
     exact_zero = numeric["error_vs_uncapped"] == 0.0
     display_err = numeric["error_vs_uncapped"].where(~exact_zero, floor)
@@ -534,18 +500,12 @@ def plot_bond_convergence():
                 "o-", color=COLORS["classical"], lw=2, ms=7, label="Measured error")
     ax.semilogy(numeric.loc[exact_zero, "max_bond"], display_err[exact_zero],
                 "o", color=COLORS["theory"], ms=9, label="Exact convergence (error = 0.0)")
-    # connect the two segments with a plain line for visual continuity
     ax.semilogy(numeric["max_bond"], display_err, "-", color=COLORS["classical"], lw=1, alpha=0.4)
 
     ax.set_xlabel("Max bond dimension  χ")
     ax.set_ylabel("|error| vs uncapped amplitude (log scale)")
     ax.legend(fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
-
-    note = (f"Green points converged EXACTLY (error printed as 0.0) — plotted at an\n"
-            f"arbitrary floor purely so the log scale renders; this is NOT a precision\n"
-            f"measurement. Data from: {os.path.basename(path)}")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=7.5, color="gray", va="bottom")
 
     plt.tight_layout()
     _save(fig, "fig9_bond_convergence")
@@ -576,11 +536,6 @@ def plot_rehearsed_vs_real():
     ax.set_ylabel("Memory (MB, log scale)")
     ax.legend(fontsize=9)
     ax.grid(True, which="both", alpha=0.3)
-
-    note = ("W only captures the single largest intermediate tensor, not total\n"
-            "memory across the whole contraction (multiple tensors coexist, plus\n"
-            "numpy/quimb overhead) — the estimate is a lower bound, not a prediction.")
-    ax.text(0.02, 0.05, note, transform=ax.transAxes, fontsize=8, color="gray", va="bottom")
 
     plt.tight_layout()
     _save(fig, "fig10_rehearsed_vs_real")

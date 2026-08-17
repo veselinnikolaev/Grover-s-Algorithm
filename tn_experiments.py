@@ -24,7 +24,6 @@ Run:
     python tn_experiments.py
 """
 
-import numpy as np
 import pandas as pd
 import os
 import warnings
