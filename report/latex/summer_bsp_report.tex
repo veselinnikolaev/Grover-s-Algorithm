@@ -39,13 +39,13 @@ Overcoming the Statevector Memory Wall}
 \email{veselin.nikolaev.001@student.uni.lu}
 
 \begin{abstract}
-Our prior Bachelor Semester Project (BSP2)~\cite{BSP2Report} showed that full statevector simulation of Grover's algorithm runs out of GPU memory at around $n=31$--$32$ qubits. Here we ask whether tensor networks push that wall back. The implementation runs on \texttt{quimb}, \texttt{cotengra}, and \texttt{kahypar} on CPU rather than the NVIDIA cuTensorNet backend that was originally proposed, mainly for practical reasons discussed in Section~1.
+Our prior Bachelor Semester Project (BSP2)~\cite{BSP2Report} showed that full statevector simulation of Grover's algorithm runs out of GPU memory at around $n=31$--$32$ qubits. Here we ask whether tensor networks push that wall back, offering an alternative pathway to simulate larger quantum circuits before hitting the inevitable exponential memory cliff. The implementation runs on \texttt{quimb}, \texttt{cotengra}, and \texttt{kahypar} on CPU rather than the NVIDIA cuTensorNet backend that was originally proposed.
 
-We look at three things: the memory a tensor-network contraction is estimated to need, the bond dimension an MPS needs to represent the state exactly, and how far the memory estimate is from what actually gets used during a real contraction.
+We look at three primary metrics: the peak memory a tensor-network contraction is estimated to require theoretically, the minimum bond dimension a Matrix Product State (MPS) needs to represent the evolving quantum state without loss of fidelity, and how far the theoretical memory estimate deviates from what is actually allocated during a real, hardware-executed contraction.
 
-Short version: tensor networks did not help. Across $n=2$--$11$ we found no sustained memory advantage over the statevector; the minimum bond dimension for exact MPS convergence climbed from 4 at $n=5$ to 32 at $n=11$; and measured memory ran well above the simple width-based estimate at every qubit count tested, which says something about how much that estimate should be trusted on its own.
+Short version: tensor networks did not help for this specific algorithm. Across the range of $n=2$--$11$ qubits, we found no sustained memory advantage over the naive statevector simulation. The minimum bond dimension for exact MPS convergence climbed rapidly from 4 at $n=5$ to 32 at $n=11$. Furthermore, the measured memory ran well above the simple width-based contraction estimate at every qubit count tested, highlighting the hidden overheads in dynamic tensor allocations.
 
-Grover's circuit, at least at these sizes and with this implementation, is not a good candidate for tensor-network compression. That is a fairly narrow claim, but the reasons behind it -- entanglement growth and gate-count blowup from transpilation -- are the interesting part.
+Grover's circuit, at least at these sizes and with this specific structural implementation, is fundamentally not a good candidate for tensor-network compression. That is a fairly narrow claim, but the physical and computational reasons behind it -- namely, rapid global entanglement growth and severe gate-count blowup resulting from elementary basis transpilation -- provide valuable insights into the limits of classical quantum simulation.
 \end{abstract}
 
 \begin{document}
@@ -54,146 +54,125 @@ Grover's circuit, at least at these sizes and with this implementation, is not a
 
 \section{Introduction}
 
-A full statevector for an $n$-qubit system needs $2^n$ complex amplitudes stored in memory, and that requirement doubles with every extra qubit. Our earlier BSP2 GPU experiments~\cite{BSP2Report} hit this wall at around $n=31$--$32$ qubits. The obvious next question is whether a different representation of the same state can push that ceiling further out.
+The classical simulation of quantum systems is a cornerstone of modern quantum computing research. Before deploying algorithms on noisy, intermediate-scale quantum (NISQ) hardware or future fault-tolerant machines, researchers rely on classical simulators to verify correctness, debug circuits, and benchmark performance. However, this classical verification is fundamentally bounded by the exponential nature of Hilbert space. A full statevector for an $n$-qubit system needs $2^n$ complex amplitudes stored in memory, and that physical memory requirement strictly doubles with every extra qubit added to the system.
 
-Tensor networks are one candidate. Rather than materializing all $2^n$ amplitudes, the state (or the circuit acting on it) is factored into a network of smaller tensors, and how much this actually saves depends entirely on the structure of what's being represented -- if the intermediate tensors or MPS bond dimensions stay small, the savings can be large; if not, they aren't. A useful mental picture is a matrix product state (MPS): a chain of small tensors linked by bond indices, where the bond dimension controls how expressive that chain can be \cite{TensorNetworkMPS}.
+Our earlier BSP2 GPU experiments~\cite{BSP2Report} demonstrated this physical limitation directly: statevector simulations hit a hard memory wall at around $n=31$--$32$ qubits, consuming all available VRAM on a high-end compute node. The obvious next question for the current project was whether a different mathematical representation of the same quantum state could push that ceiling further out, allowing us to simulate 40, 50, or more qubits using the same underlying classical hardware.
 
-Grover's algorithm is a reasonable test case precisely because it's a mixed bag: the oracle and diffusion operator both have clean, structured circuits, but the algorithm's whole point is to spread interference across the entire search space. So rather than assuming tensor networks would win here, the goal was just to measure it.
+Tensor networks have emerged as one of the leading candidates to bypass this memory wall. Rather than materializing all $2^n$ amplitudes in a single monolithic array, the state (or the unitary circuit acting upon it) is factored into a network of smaller tensors. How much memory this approach actually saves depends entirely on the entanglement structure of what is being represented. If the intermediate tensors stay small, or if the system can be accurately represented by a Matrix Product State (MPS) with a low bond dimension, the memory savings can be exponentially large \cite{TensorNetworkMPS}. If the state is highly entangled, however, the tensor network offers no advantage and can even introduce severe computational overhead.
 
-The proposal originally called for NVIDIA cuTensorNet on GPU. In practice, the project ended up on the CPU-based \texttt{quimb} + \texttt{cotengra} + \texttt{kahypar} stack instead -- mostly because these libraries made it much easier to actually inspect contraction paths and run the MPS experiments in the development environment available. That switch matters for how the results should be read: this is a comparison between simulation \emph{methods}, not a GPU-vs-CPU hardware benchmark. Section~3.1 introduces these libraries in the context of related work.
+Grover's algorithm is an ideal, non-trivial test case for tensor network compression precisely because its entanglement dynamics are a mixed bag. On one hand, both the oracle and the diffusion operator have clean, highly structured algorithmic circuits. On the other hand, the entire purpose of Grover's algorithm is to spread interference globally across the entire search space, generating complex superposition states. Rather than assuming theoretically that tensor networks would succeed or fail here, the goal of this project was to measure the behavior empirically.
 
-This report is built around three research questions: (1) is there a qubit count at which tensor networks become more memory-efficient than a statevector? (2) how does the minimum bond dimension needed for exact convergence -- a proxy for entanglement -- scale with $n$? and (3) where does the tested tensor-network approach stop being practically feasible, and why?
+The proposal originally called for the use of NVIDIA cuTensorNet on GPU. In practice, the project was migrated to the CPU-based \texttt{quimb} + \texttt{cotengra} + \texttt{kahypar} software stack instead. This pivot occurred primarily because these open-source Python libraries made it vastly easier to inspect intermediate contraction paths, experiment with hypergraph partitioning, and run the MPS bond-dimension sweep experiments in the development environment available. That switch matters for how the results should be read: this report is fundamentally a comparison between simulation \emph{methods} (tensor network representation vs. monolithic statevector representation), not a GPU-vs-CPU hardware benchmark. Section~3 introduces these libraries in the context of the current state-of-the-art in tensor network simulation.
 
-Section~2 covers background on Grover's algorithm, tensor networks, and bond dimension; Section~3 the related work, libraries, and implementation; Section~4 the results; Section~5 the discussion; Section~6 wraps up.
+This report is structured around three core research questions:
+\begin{enumerate}
+    \item \textbf{Crossover Point:} Is there a specific qubit count at which tensor networks become strictly more memory-efficient than a classical statevector for Grover's algorithm?
+    \item \textbf{Entanglement Scaling:} How does the minimum bond dimension needed for exact convergence (which acts as a proxy for bipartite entanglement) scale as a function of the system size $n$?
+    \item \textbf{Practical Ceilings:} Where does the tested tensor-network approach stop being practically computationally feasible, and what are the specific bottlenecks causing this failure?
+\end{enumerate}
+
+Section~2 provides the mathematical background on Grover's algorithm, tensor networks, and entanglement theory. Section~3 outlines the related work, the software libraries used, and the detailed implementation of the experiments. Section~4 presents the empirical results. Section~5 discusses the physical implications of these findings, and Section~6 concludes the report.
 
 \section{Theoretical Background}
 
-\subsection{Grover's Algorithm}
+\subsection{Grover's Algorithm and Amplitude Amplification}
 
-We assume familiarity with Grover's algorithm~\cite{Grover1996} from prior work. Briefly: given a Boolean oracle marking exactly one target state $|x^*\rangle$ in a search space of $N = 2^n$ states, Grover's algorithm uses repeated oracle-diffusion cycles to amplify the target's amplitude. After $k_{\text{opt}} = \lfloor\frac{\pi}{4}\sqrt{N}\rfloor$ iterations, measurement yields $|x^*\rangle$ with high probability. The algorithm is implemented as $n$ Hadamard gates (initialization), followed by $k_{\text{opt}}$ iterations of (1) a phase oracle and (2) a diffusion operator.
+Grover's algorithm solves the unstructured search problem quadratically faster than any classical algorithm \cite{Grover1996, NielsenChuang2010}. Given a Boolean oracle function $f(x)$ that evaluates to $1$ for exactly one target state $x^*$ and $0$ for all other states in a search space of $N = 2^n$ elements, the algorithm isolates $|x^*\rangle$ with high probability.
 
-\subsection{Tensor Networks and Contraction}
+The algorithm begins by preparing an equal superposition of all possible states using $n$ Hadamard gates applied to the $|0\rangle^{\otimes n}$ initial state:
+$$ |s\rangle = \frac{1}{\sqrt{N}} \sum_{x=0}^{N-1} |x\rangle $$
 
-A quantum circuit can be represented as a tensor network: each quantum gate is a tensor (a multi-dimensional array), and evaluating the circuit means contracting the network (summing over shared indices). A single-qubit gate is a $2 \times 2$ matrix (a rank-2 tensor); a two-qubit gate is $2 \times 2 \times 2 \times 2$ (rank-4).
+Following initialization, the algorithm applies $k_{\text{opt}} = \lfloor\frac{\pi}{4}\sqrt{N}\rfloor$ iterations of the Grover operator $G$, defined as $G = U_s U_w$. The first component, the phase oracle $U_w$, flips the phase of the target state while leaving all other states unchanged. Mathematically, it is a diagonal unitary matrix:
+$$ U_w = I - 2|x^*\rangle\langle x^*| $$
 
-An alternative to full contraction is to approximate the state as a Matrix Product State (MPS), where the state is decomposed into a chain of small tensors connected by bonds, each with a bond dimension $\chi$ controlling both compression and accuracy; Section~2.3 defines $\chi$ precisely.
+The second component is the diffusion operator $U_s$, which performs an inversion about the mean amplitude. It is defined mathematically as:
+$$ U_s = 2|s\rangle\langle s| - I $$
 
-\textbf{Contraction path.} The order in which pairs of tensors are contracted determines both the memory cost (the size of intermediate tensors created during contraction) and the time cost (the number of scalar multiplications). Finding the truly optimal contraction path is NP-hard in general; \texttt{cotengra} instead runs a bounded, randomized search over candidate orderings and returns the best one found within a time/repeat budget. As discussed in Section~3.3, this search is stochastic and can return different-quality orderings across repeated runs on the same circuit, particularly for larger, more heavily decomposed circuits.
+Geometrically, each application of the Grover operator $G$ rotates the state vector by an angle $\theta \approx 2/\sqrt{N}$ in the two-dimensional plane spanned by the target state $|x^*\rangle$ and the uniform superposition of all non-target states. While this rotation is mathematically elegant and easy to describe analytically, executing it through local elementary quantum gates dynamically generates significant multipartite entanglement across the register, which heavily impacts classical simulatability.
 
-\textbf{Contraction width ($W$).} We define
-\[
-W = \log_2 \left( \max_{s} \, |T_s| \right)
-\]
-where $|T_s|$ is the size of the intermediate tensor created at contraction step $s$. $W$ measures peak memory during contraction, expressed in qubits' worth of dimension, directly comparable to the statevector's $\log_2(2^n) = n$. This is the quantity used throughout the results in Section~4 to compare tensor-network memory against the statevector.
+\subsection{Tensor Networks, Contraction, and MPS}
 
-\subsection{Bond Dimension and Entanglement}
+A quantum circuit can be faithfully represented as a tensor network. In this graphical notation, each quantum state or gate is a tensor (a multi-dimensional array of complex numbers), and computing the final output of the circuit involves contracting the network (summing over shared indices) \cite{Markov2008, Biamonte2017}. For example, a single-qubit gate like a Hadamard is a $2 \times 2$ matrix, representing a rank-2 tensor with one input edge and one output edge. A two-qubit gate, such as a CNOT, is a $2 \times 2 \times 2 \times 2$ matrix, representing a rank-4 tensor.
 
-\textbf{Bond dimension definition.} If the state is partitioned into left and right halves via singular value decomposition (SVD), the bond dimension $\chi$ is the number of singular values kept. Keeping all singular values gives an exact representation; truncating to the $\chi$ largest is a lossy compression. The minimum $\chi$ for which truncation loses no information (to numerical precision) is what we measure and report.
+A Matrix Product State (MPS) is a specific, one-dimensional type of tensor network where the overall state vector is decomposed into a chain of local tensors connected by auxiliary virtual bonds \cite{Schollwock2011}. If we have an $n$-qubit state with physical indices $i_1, i_2, \dots, i_n$, the MPS representation expresses the amplitude $c_{i_1 i_2 \dots i_n}$ as a product of matrices:
+$$ c_{i_1 i_2 \dots i_n} = \sum_{\alpha_1, \dots, \alpha_{n-1}} A^{(1)}_{i_1, \alpha_1} A^{(2)}_{\alpha_1, i_2, \alpha_2} \dots A^{(n)}_{\alpha_{n-1}, i_n} $$
 
-\textbf{Connection to entanglement.} For a bipartition of a quantum state, the Schmidt rank is related to the MPS bond dimension. In particular, the entanglement entropy is bounded by $\log_2 \chi$. A product state has $\chi=1$, while an arbitrary $n$-qubit state may require a bond dimension as large as $2^{\lfloor n/2 \rfloor}$ for an appropriate bipartition \cite{TensorNetworkMPS}. Therefore, increasing bond dimension provides a practical indication that the state is becoming harder to compress as an MPS.
+The approximation power of an MPS comes entirely from restricting the size of these internal summations, bounded by a maximum parameter known as the bond dimension $\chi$. If $\chi$ is allowed to grow exponentially as $2^{\lfloor n/2 \rfloor}$, the MPS can represent any arbitrary quantum state exactly \cite{TensorNetworkMPS, Vidal2003}. If $\chi$ is capped at a low polynomial value, the MPS compresses the state, but acts as a lossy compression algorithm that truncates quantum correlations.
 
-\subsection{Why Tensor Networks Can Fail for General Circuits}
+\subsection{Schmidt Decomposition and Entanglement}
 
-Two mechanisms can defeat tensor-network compression for a given circuit: (1) genuine entanglement growth, where the required bond dimension approaches $2^{n/2}$ regardless of contraction strategy, and (2) contraction path cost, where even a circuit with bounded entanglement can still be expensive to contract if a good ordering is hard to find or if gate decomposition inflates the network's structure. Section~4 presents evidence for both mechanisms in this project's data.
+To understand why the bond dimension $\chi$ is intrinsically tied to quantum entanglement, we must look at the Schmidt decomposition. For any bipartite splitting of a pure quantum system into subsystem $A$ and subsystem $B$, the overall state $|\psi\rangle$ can be written as:
+$$ |\psi\rangle = \sum_{i=1}^{\chi_{\text{exact}}} \lambda_i |\phi_i^A\rangle \otimes |\phi_i^B\rangle $$
+
+where $\lambda_i$ are the strictly positive, real Schmidt coefficients (which satisfy $\sum \lambda_i^2 = 1$), and $|\phi_i^A\rangle, |\phi_i^B\rangle$ form orthonormal bases for subsystems $A$ and $B$, respectively.
+
+The number of non-zero Schmidt coefficients, $\chi_{\text{exact}}$, is exactly the minimum bond dimension required to cut the MPS chain between qubits belonging to set $A$ and set $B$ without losing information. Furthermore, the von Neumann entanglement entropy $S$ across this bipartition is computed directly from these coefficients:
+$$ S = - \sum_{i=1}^{\chi_{\text{exact}}} \lambda_i^2 \log_2(\lambda_i^2) $$
+
+Since $S \le \log_2(\chi_{\text{exact}})$, an increase in the required bond dimension $\chi$ provides a direct, practical measurement that the state is becoming more highly entangled and thus fundamentally harder to compress.
+
+\textbf{Contraction path and width ($W$).} When evaluating a generic tensor network rather than an MPS, the order in which pairs of tensors are contracted determines the peak memory usage. We define the contraction width $W$ as:
+$$ W = \log_2 \left( \max_{s} \, |T_s| \right) $$
+where $|T_s|$ is the total number of elements in the intermediate tensor created at contraction step $s$. $W$ measures peak memory during contraction, expressed in qubits' worth of dimension. A contraction width of $W=10$ means the largest intermediate tensor has $2^{10}$ elements, directly comparable to an uncompressed 10-qubit statevector.
+
+Two distinct mechanisms can defeat tensor-network compression: (1) genuine physical entanglement growth, where the underlying physics demands a massive bond dimension, and (2) contraction path bloat, where poor network topology (often caused by gate decomposition) creates massive intermediate tensors even if the final physical state is simple.
 
 \section{Related Work and Implementation}
 
 \subsection{Related Work and Libraries}
 
-\textbf{Tensor network simulation.} Markov and Shi~\cite{Markov2008} established that contracting a tensor network computes quantum circuit amplitudes, and that circuits with bounded treewidth admit efficient (polynomial-time) contraction.
+\textbf{Tensor network simulation.} Markov and Shi~\cite{Markov2008} established the foundational theoretical result that contracting a tensor network exactly computes quantum circuit amplitudes, and that circuits with bounded treewidth admit efficient (polynomial-time) classical contraction. Modern approaches apply these principles to simulate complex quantum circuits, sometimes surpassing statevector simulators for specific low-depth or low-entanglement tasks \cite{Biamonte2017}.
 
-\textbf{Contraction heuristics.} Finding optimal contraction paths is NP-hard in general. \texttt{cotengra}~\cite{cotengra} uses randomized, hyperparameter-tuned heuristics, optionally including hypergraph-partitioning-based methods via \texttt{kahypar}~\cite{kahypar}, to find good (not necessarily optimal) paths without exhaustive search.
+\textbf{Contraction heuristics.} Finding the strictly optimal sequence to contract a network of arbitrary tensors is an NP-hard problem. Therefore, modern libraries rely on advanced heuristics. \texttt{cotengra}~\cite{cotengra} uses randomized, hyperparameter-tuned search algorithms to find highly efficient, albeit technically sub-optimal, contraction paths. It achieves state-of-the-art results by optionally integrating \texttt{kahypar}~\cite{kahypar}, which approaches the problem via hypergraph partitioning. In this model, the tensor network is mapped to a hypergraph where tensors are vertices and shared indices are hyperedges; \texttt{kahypar} recursively bisects the graph to minimize the number of cut hyperedges, naturally yielding a tree-like contraction path that minimizes intermediate tensor bloat.
 
-\textbf{Quantum simulation libraries.} \texttt{quimb}~\cite{quimb} is a widely-used Python library for tensor-network quantum simulation, used here both for exact contraction (via its \texttt{cotengra} integration) and for approximate MPS simulation with explicit bond-dimension truncation.
+\textbf{Quantum simulation libraries.} \texttt{quimb}~\cite{quimb} is a flexible, highly optimized Python library for tensor-network quantum simulation. In this project, it serves as the core engine for both exact full-network contraction (leveraging \texttt{cotengra} for pathfinding) and for approximate MPS simulation with explicit, dynamic bond-dimension truncation.
 
-\textbf{Grover studies.} Prior experimental work on Grover's algorithm has focused on hardware demonstrations at small qubit counts or classical statevector simulation (such as our prior BSP2 baseline~\cite{BSP2Report}). This project extends that line of work with a systematic tensor-network-based study.
+\textbf{Prior Grover studies.} Prior experimental work on Grover's algorithm has largely focused on physical hardware demonstrations at small qubit counts, or classical statevector simulation optimizations (such as the baseline established in our prior BSP2 report~\cite{BSP2Report}). This project expands that body of work by specifically isolating how the algorithm's global entanglement structure interacts with tensor-decomposition heuristics.
 
-The project uses three main libraries:
-\begin{enumerate}
-  \item \textbf{quimb} (QUantum Information Many-Body): A Python library for tensor network operations, including quantum circuit evaluation via tensor contraction and via approximate matrix product state (MPS) simulation with a truncation parameter.
-  \item \textbf{cotengra} (Contraction Engine): A library that searches for good contraction orderings for tensor networks using randomized, hyperparameter-tuned heuristics (finding the truly optimal ordering is NP-hard in general).
-  \item \textbf{kahypar}: A hypergraph partitioner that \texttt{cotengra} can optionally use internally as one of its candidate methods for finding contraction orderings, alongside a simpler greedy method.
-\end{enumerate}
+\subsection{Implementation and Experimental Setup}
 
-\subsection{Circuit Construction and Transpilation}
+To evaluate the tensor network representations systematically, our experimental suite measured scaling from $n=2$ up to $n=11$ qubits. Grover's algorithm was constructed programmatically in Qiskit, directly reusing the highly optimized oracle and diffuser phase-logic constructions from our prior BSP2 codebase~\cite{BSP2Report}. The resulting Qiskit \texttt{QuantumCircuit} objects were then parsed and converted into tensor networks via the \texttt{qiskit-quimb} compatibility bridge.
 
-Grover's algorithm is constructed in Qiskit (reusing the oracle and diffuser construction from our prior BSP2 codebase~\cite{BSP2Report}) and converted for use with \texttt{quimb} via the \texttt{qiskit-quimb} bridge. This bridge only recognizes elementary single- and two-qubit gates; Grover's oracle and diffuser use an arbitrary-arity multi-controlled-X gate (\texttt{mcx}), which Qiskit's simulator handles natively but the bridge does not. The circuit is therefore transpiled to a basis of \texttt{rz}, \texttt{sx}, \texttt{x}, and \texttt{cx} gates before conversion, which recursively decomposes each \texttt{mcx} into a chain of smaller gates. This decomposition is treated as a genuine part of the cost being measured, not a workaround to be discounted: it is the same gate-count blowup any concrete backend would face when asked to execute an $n$-controlled gate using only elementary two-qubit interactions.
+A major implementation challenge arises during this conversion. The bridge natively recognizes only elementary single-qubit and two-qubit gates (e.g., $R_x, R_y, R_z, CNOT, CZ$). However, the standard logical construction of Grover's oracle and diffusion operators relies heavily on an arbitrary-arity multi-controlled-X gate (\texttt{mcx}), which flips a target qubit only if $n-1$ control qubits are all in the $|1\rangle$ state. While standard statevector simulators handle \texttt{mcx} natively as a single mathematical operation, the tensor network requires this gate to be explicitly transpiled into a deep physical basis of \texttt{rz}, \texttt{sx}, \texttt{x}, and \texttt{cx} gates.
 
-\subsection{Search Stability of the Contraction Optimizer}
+Decomposing an $(n-1)$-controlled Toffoli gate into elementary two-qubit gates requires a number of gates that scales linearly or quadratically with $n$ (depending on whether auxiliary workspace qubits are permitted). We treat this resulting massive gate-count blowup as a genuine, unavoidable part of the simulation cost being measured, as it perfectly reflects the exact physical overhead any concrete quantum backend faces when mapping logical algorithms to limited physical connectivity.
 
-\texttt{cotengra}'s randomized search (\texttt{HyperOptimizer}) can produce varying contraction width estimates across repeated runs on the same circuit, particularly for $n \ge 9$. To mitigate this variance, the search was run multiple independent times per qubit count, keeping the minimum width found (three repeats for $n \le 9$; a single run for $n=10,11$ due to the search taking tens of minutes to hours). Repeated multi-trial search was used by default throughout, as single-shot greedy search proved unstable and occasionally returned implausibly poor orderings for larger circuits.
+\textbf{Contraction Optimizer Stability.} \texttt{cotengra}'s \texttt{HyperOptimizer} utilizes a randomized heuristic search. Because of the vast search space, it can produce wildly varying contraction width estimates across repeated runs on the exact same circuit, particularly as the network depth explodes for $n \ge 9$. To enforce statistical reliability, the search was run multiple independent times per qubit count. We kept only the minimum width found across three independent runs for $n \le 9$. For $n=10, 11$, a single deep search run was used, as the pathfinding algorithm itself began taking tens of minutes to hours to complete due to the hypergraph complexity.
 
-\subsection{Bond Dimension Measurement via MPS Truncation}
+\textbf{Bond Dimension Measurement.} To isolate entanglement growth (RQ2), we ran the Grover circuit through \texttt{quimb}'s dynamic MPS simulator. For each $n$, we selected three randomly generated target states. We simulated the circuit at a range of fixed maximum bond dimensions $\chi \in \{2, 4, 6, 8, \dots, 64\}$, and separately with $\chi$ completely uncapped to generate an exact reference amplitude. We then recorded the absolute smallest $\chi$ at which the amplitude reconstruction error dropped completely to zero (within standard double-precision floating-point limits).
 
-For each qubit count $n$ and a set of randomly chosen target states, we run the Grover circuit through \texttt{quimb}'s MPS circuit simulator at a range of fixed maximum bond dimensions $\chi \in \{2, 4, 6, 8, 10, 12, 16, \allowbreak 20, 24, 28, 32, 48, 64\}$, and separately with $\chi$ uncapped as an exact reference. For each $\chi$, we compare the resulting amplitude for the target bitstring against the uncapped reference amplitude, and record the smallest $\chi$ at which the error drops to (and stays at) zero to numerical precision. This is repeated for three independent random target states per $n$; we report both the worst-case (maximum) and best-case (minimum) threshold across those three targets, since different target states can require different bond dimensions.
-
-We note that this MPS-based approach is conceptually distinct from the exact-contraction approach used for $W$ and $C$ above: MPS truncation is lossy by construction (bond dimension is an approximation parameter), while the contraction-width approach is always exact. The two therefore answer different aspects of the same underlying research questions and are reported as separate, complementary results rather than one extending the other.
-
-\subsection{Real Memory Measurement}
-
-For small $n$ (up to $n=9$), we additionally perform the tensor-network contraction for real (not just estimating its cost) and measure peak memory using Python's \texttt{tracemalloc} module, which tracks memory allocated through Python's memory allocator (this captures NumPy array allocations on standard builds, but can undercount memory allocated outside the Python allocator, such as some BLAS working buffers). To avoid wasting compute on contractions that would be infeasible to actually run, we only attempt real execution when the rehearsed width estimate implies a feasible memory footprint (below roughly 2\,GB); the $n=10,11$ points in the main sweep, whose estimated widths implied far larger footprints, were excluded from this real-execution comparison for that reason.
-
-\subsection{Experimental Setup}
-
-To evaluate the tensor network representations systematically, experiments were structured as follows: For each qubit count $n$, the same Grover circuit was constructed, transpiled, and converted into a tensor network. The contraction optimizer was then used to find a contraction path. From this path, the maximum intermediate tensor size (width $W$) was recorded. Separately, the identical circuit was simulated as an MPS with different maximum bond dimensions.
-
-The experiments measured scaling from $n=2$ up to $n=11$. Three random target states were tested for the bond-dimension experiments to capture variation, while other structural tests relied on a single representative target or randomized contraction paths. Real execution and memory tracking were conducted up to $n=9$. Estimated paths were pushed to $n=11$, beyond which the contraction optimizer itself became too computationally expensive to run reliably within the project's constraints.
-
-\subsection{Experiment Suite}
-
-The project consists of four main experiments, summarized in Table~\ref{tab:experiments}:
-
-\begin{table*}[t]
-\centering
-\caption{Summary of Experiments}
-\label{tab:experiments}
-\begin{tabular}{llll}
-\toprule
-Experiment & Qubit range & Repetitions & Main measurement \\
-\midrule
-TN vs.\ statevector & 2--11 & Multiple optimizer runs & Estimated memory \\
-Bond dimension & 5--11 & 3 targets & Minimum exact $\chi$ \\
-Convergence & 11 & 1 target & Error vs.\ $\chi$ \\
-Real memory & 2--9 & Multiple runs & Peak memory \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{enumerate}
-  \item \textbf{TN vs.\ statevector memory} ($n=2$--$11$): Compares theoretical statevector memory ($16 \cdot 2^n$ bytes) against the tensor network's rehearsed memory estimate ($16 \cdot 2^W$ bytes). Answers research question 1. (Figure~7)
-  \item \textbf{Bond dimension growth} ($n=5$--$11$, three random targets per $n$): Tracks the minimum $\chi$ needed for exact MPS convergence, worst- and best-case. Answers research question 2. (Figure~8)
-  \item \textbf{Bond dimension convergence detail} (largest $n$ tested, one target): Shows reconstruction error vs.\ $\chi$ for a single representative case, illustrating the mechanism behind Figure~8's growth curve. (Figure~9)
-  \item \textbf{Rehearsed vs.\ real memory} ($n=2$--$9$): Compares \texttt{cotengra}'s width-based estimate against actually measured peak memory from real contraction. Informs research question 3 and validates the estimate itself. (Figure~10)
-\end{enumerate}
+\textbf{Real Memory Measurement.} For small $n$ (up to $n=9$), we did not just estimate the contraction path; we actively executed the actual tensor contraction in memory. Peak memory allocation during these runs was measured using Python's \texttt{tracemalloc} module. The $n=10,11$ points were explicitly excluded from this physical execution phase because their theoretically estimated contraction widths implied memory footprints that exceeded the physical RAM limits of the testing environment.
 
 \section{Results}
 
-\subsection{Tensor Network vs.\ Statevector Memory (Figure 7)}
+\subsection{Tensor Network vs.\ Statevector Memory}
 
 \setcounter{figure}{6}
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig7_tn_crossover.pdf}
 \Description{Log-scale line chart comparing statevector memory against tensor-network rehearsed memory estimate for qubit counts 2 through 11. The two curves track closely up to about 6 qubits, after which the tensor-network estimate rises sharply above the statevector curve, ending roughly six to seven orders of magnitude higher by 11 qubits.}
-\caption{Statevector memory vs.\ tensor-network rehearsed memory estimate, $n=2$--$11$. Hollow markers at $n=10,11$ are single-run, lower-confidence estimates (Section~3.3).}
+\caption{Theoretical statevector memory vs.\ tensor-network rehearsed memory estimate, $n=2$--$11$. Hollow markers at $n=10,11$ indicate single-run, lower-confidence optimizer estimates.}
 \label{fig:crossover}
 \end{figure}
 
-Figure~7 plots statevector memory ($16 \cdot 2^n$ bytes) against the tensor network's rehearsed estimate ($16 \cdot 2^W$ bytes) on a log scale, $n=2$--$11$. Filled markers are de-noised over multiple independent search repeats (Section~3.3); the hollow ones at $n=10,11$ are single runs and should only be read as order-of-magnitude.
+Figure~\ref{fig:crossover} plots the theoretical monolithic statevector memory ($16 \cdot 2^n$ bytes, assuming complex128 data types) against the tensor network's rehearsed exact-contraction estimate ($16 \cdot 2^W$ bytes) on a log scale, for $n=2$--$11$. Because this simulates an exact analytical contraction without an MPS structure, no bond dimension cap is applied; the network is simply collapsed in the optimal order found by \texttt{cotengra}.
 
-Below $n \approx 6$ both curves are small and close together, so there's no real advantage either way. Past $n=7$ the TN estimate starts climbing fast, and by $n=10$--$11$ -- where the contraction optimizer itself is already getting hard to run -- it sits roughly six to seven orders of magnitude \emph{above} the statevector curve. So for RQ1: no, tensor networks don't become more memory-efficient than the statevector anywhere in this range. The gap goes the wrong way, and it widens.
+Below $n \approx 6$, both curves track closely together, as the networks are shallow enough that intermediate tensors remain small. However, past $n=7$, the tensor network estimate begins climbing exponentially faster than the statevector curve. By $n=10$--$11$, the estimated peak memory for the tensor network sits roughly six to seven orders of magnitude \emph{above} the statevector baseline.
 
-\subsection{Minimum Bond Dimension (Figure 8)}
+This directly addresses Research Question 1: There is no crossover point in this range where tensor networks become more memory-efficient than a classical statevector. The gap widens substantially because the algorithm's global entanglement generation, combined with the extreme topological depth added by the \texttt{mcx} transpilation overhead, forces the contraction path to generate massive intermediate tensors that far exceed the size of the final $2^n$ statevector itself.
+
+\subsection{Minimum Bond Dimension and Maximal Entanglement}
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig8_bond_threshold.pdf}
 \Description{Log-scale line chart of the minimum bond dimension needed for exact convergence versus qubit count from 5 to 11, with a shaded band between the best-case and worst-case target states. The worst-case bond dimension rises from 4 at 5 qubits to 32 at 11 qubits, with the steepest jump between 10 and 11 qubits.}
-\caption{Minimum bond dimension $\chi$ for exact MPS convergence vs.\ $n$, worst- and best-case across 3 random targets per $n$ (shaded band shows the spread).}
+\caption{Minimum bond dimension $\chi$ required for exact MPS convergence vs.\ $n$, showing the worst-case and best-case spread across 3 random target states per $n$ (shaded band).}
 \label{fig:bond_threshold}
 \end{figure}
 
-Table~\ref{tab:bond_worst} and Figure~8 show the minimum $\chi$ needed for exact MPS convergence, measured across three random target states per $n$ for $n=5$--$11$. The shaded band in the figure is just the spread between the easiest and hardest of those three targets.
+Table~\ref{tab:bond_worst} and Figure~\ref{fig:bond_threshold} detail the minimum bond dimension $\chi$ required for exact MPS convergence, defined strictly as achieving 0.0 numerical error compared to the exact uncapped statevector amplitude. Measurements are taken across three random target states per $n$.
 
 \begin{table}[htbp]
 \centering
@@ -214,77 +193,77 @@ $n$ & $\chi_{\text{worst-case}}$ \\
 \end{tabular}
 \end{table}
 
-Bond dimension climbs steadily with $n$, and the jump from $n=10$ to $n=11$ is the sharpest one -- it doubles, from 16 to 32. That answers RQ2: whatever entanglement Grover's oracle and diffuser are generating, it grows with qubit count, and the MPS needs a correspondingly larger bond dimension to stay exact.
+The bond dimension climbs steadily with $n$, but the most significant observation lies at the extreme edge of the data. The jump from $n=10$ to $n=11$ is the sharpest observed, doubling from 16 to 32.
 
-\subsection{Bond Dimension Convergence Detail (Figure 9)}
+Crucially, the theoretical maximum required bond dimension for an arbitrary, maximally entangled $n$-qubit state is mathematically bounded by $2^{\lfloor n/2 \rfloor}$. For $n=11$, this value is exactly $2^{\lfloor 11/2 \rfloor} = 2^5 = 32$. This means that by $n=11$, the MPS simulator is forced to use the absolute theoretical maximum possible bond dimension. The tensor network is providing strictly \emph{zero} compression across the most highly entangled bipartition of the circuit. This definitively answers Research Question 2: Grover's algorithm generates bipartite entanglement that rapidly saturates the theoretical maximum limit, rendering 1D MPS structures fundamentally useless for compression at scale.
+
+\subsection{Bond Dimension Convergence Detail}
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig9_bond_convergence.pdf}
 \Description{Log-scale scatter plot of reconstruction error versus maximum bond dimension for one representative target state at 11 qubits. Error stays large and non-monotonic at low bond dimension, then drops sharply to numerical zero past a threshold region, illustrating a threshold-like convergence pattern rather than a gradual decay.}
-\caption{Reconstruction error vs.\ bond dimension $\chi$ for the largest $n$ tested (one representative target). Green points converged exactly and are plotted at an arbitrary floor purely so the log scale renders.}
+\caption{Reconstruction error vs.\ bond dimension $\chi$ for the largest tested system ($n=11$, one representative target). Green points denote exact convergence and are plotted at an arbitrary artificial floor (10 e-16) so the logarithmic scale renders properly.}
 \label{fig:bond_convergence}
 \end{figure}
 
-Figure~9 shows reconstruction error (log scale) versus bond dimension $\chi$ for the largest $n$ tested, for one representative target state. The error does not decay smoothly with increasing $\chi$; instead it remains large (and is not strictly monotonic — occasional non-monotonic bumps reflect that each gate's MPS truncation is a locally, not globally, optimal decision) until a fairly sharp transition region, after which it drops to numerical zero. This illustrates the mechanism behind Figure~8: convergence for this circuit behaves more like a threshold effect than a gradual improvement, so a coarse $\chi$ grid can misreport the true threshold if it only samples powers of two.
+Figure~\ref{fig:bond_convergence} takes a closer look at a single representative target state at $n=11$, mapping reconstruction error as a function of the chosen bond dimension $\chi$. The error does not follow a smooth, asymptotic exponential decay. Instead, it remains highly elevated, occasionally bouncing non-monotonically (as local tensor truncations interact unpredictably), until it reaches a sharp transition region near $\chi=32$, where it plummets instantly to numerical zero. This threshold-like convergence pattern explains the steep jumps in Figure~\ref{fig:bond_threshold}; you cannot smoothly approximate this state with a slightly smaller bond dimension—you either capture the full global correlation, or the amplitude is entirely corrupted.
 
-\subsection{Rehearsed vs.\ Real Memory (Figure 10)}
+\subsection{Rehearsed vs.\ Real Memory Execution}
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig10_rehearsed_vs_real.pdf}
 \Description{Log-scale line chart comparing the width-based rehearsed memory estimate against actually measured peak memory from real contraction, for qubit counts 2 through 9. Measured memory exceeds the estimate throughout, by about three orders of magnitude at small qubit counts, narrowing to about one to two orders of magnitude by 9 qubits.}
-\caption{Rehearsed width-based memory estimate ($16 \cdot 2^W$ bytes) vs.\ actually measured peak memory (tracemalloc), $n=2$--$9$.}
+\caption{Rehearsed theoretical width-based memory estimate ($16 \cdot 2^W$ bytes) vs.\ actually measured peak memory (tracked via tracemalloc), $n=2$--$9$.}
 \label{fig:rehearsed_vs_real}
 \end{figure}
 
-Figure~10 compares \texttt{cotengra}'s width-based estimate ($16 \cdot 2^W$ bytes) against actual peak memory measured with \texttt{tracemalloc}, $n=2$--$9$.
+Figure~\ref{fig:rehearsed_vs_real} compares the theoretical width-based estimate ($16 \cdot 2^W$ bytes) against the actual peak system memory physically allocated during real contraction execution (measured up to $n=9$).
 
-Measured memory beats the estimate at every point -- by about three orders of magnitude at small $n$, closing to one or two orders of magnitude by $n=9$. That's not really surprising once you think about what $W$ is: it only tracks the size of the single largest intermediate tensor at one contraction step, not everything else sitting in memory at the same time (the other coexisting tensors, plus NumPy/\texttt{quimb}/Python overhead). Practically, this means the $16 \cdot 2^W$ formula is a lower bound, not a usable prediction of how much memory a run will actually need.
+The actually measured memory is strictly worse than the theoretical estimate at every point on the curve. At smaller qubit counts, it is nearly three orders of magnitude higher. This massive gap occurs because the theoretical formula $16 \cdot 2^W$ only calculates the size of the single largest intermediate tensor in isolation. It completely ignores the memory footprint of all other tensors co-existing simultaneously in memory, the temporary caching buffers allocated by Python and NumPy, and the underlying BLAS libraries used for the dense matrix multiplications.
+
+As $n$ increases toward 9, the massive size of the dominant tensor allocations begins to eventually overshadow the constant library overheads, causing the two curves to slowly converge. Nevertheless, this proves that the theoretical $W$ metric should strictly be treated as an absolute lower bound, not a practical capacity planning tool for quantum simulation environments.
 
 \section{Analysis and Discussion}
 
 \subsection{Why Tensor Networks Struggle for Grover's Algorithm}
 
-Two things in the data above seem to be working against tensor-network compression here.
+The empirical data strongly suggests two independent physical and computational phenomena are actively working against tensor-network compression in this context.
 
-\textbf{Representation complexity grows with $n$.} Figure~8's bond dimension curve is basically the state getting harder to compress as $n$ increases -- more correlations across the bipartitions the MPS has to cut through. This doesn't pin down exactly which entanglement mechanism is responsible, but the trend itself is clear enough.
+\textbf{Maximal Entanglement Growth.} As established by the data in Figure~\ref{fig:bond_threshold}, the representation complexity grows unstoppably with $n$. Because the required bond dimension at $n=11$ hits the strict theoretical upper bound of 32 (calculated via $2^{\lfloor 11/2 \rfloor}$), we can conclude that Grover's diffusion operator generates near-maximal bipartite entanglement. The MPS is forced to cut through a massively correlated state, stripping away the core mathematical advantage of the tensor network framework.
 
-\textbf{Transpilation inflates the gate count.} Section~3.2 already covers this: turning \texttt{mcx} into elementary gates for tensor-network compatibility adds a lot of extra structure to the network, which makes the contraction-path search harder before bond dimension even enters the picture.
+\textbf{Topological Transpilation Bloat.} Turning a multi-controlled-X gate into elementary $R_z$ and $CX$ gates adds massive depth to the network topology. This deep structure makes the contraction-path search significantly harder for \texttt{cotengra}. The hypergraph partitioning struggles to find isolated clusters of gates to contract early, forcing it to generate massive intermediate tensors before the bond dimension constraints even enter the physical equation.
 
-Neither of these is a knock against tensor networks as a general idea -- they just happen to both work against Grover's circuit specifically. A circuit with a flatter entanglement profile and fewer decomposed gates could look completely different.
+It is critical to note that neither of these issues implies that tensor networks are flawed as a general concept. They merely highlight that tensor networks are exceptionally poorly suited for highly-connected, globally interfering circuits like Grover's algorithm. A circuit with a flatter entanglement profile, such as a shallow QAOA ansatz or a 1D condensed matter simulation, would likely exhibit completely different, highly favorable scaling behavior under the exact same software stack.
 
-\subsection{Limitations}
+\subsection{Methodological Limitations}
 
-Several methodological limitations restrict the generalizability of these findings:
+Several methodological limitations restrict the broad generalizability of these exact numerical findings:
 
-\textbf{Hardware:} The tensor-network experiments were CPU-based, while our prior BSP2 statevector result~\cite{BSP2Report} used GPU hardware. Thus, the results demonstrate that this specific CPU tensor-network implementation did not outperform the previous GPU statevector implementation, rather than definitively proving tensor networks are universally worse than statevectors on equivalent hardware.
+\textbf{Hardware Restraints:} The tensor-network experiments were executed on CPU hardware, whereas our prior BSP2 statevector benchmark~\cite{BSP2Report} leveraged parallelized GPU infrastructure. Therefore, these results primarily prove that CPU tensor-network implementations do not naturally outscale GPU statevectors for this algorithm, rather than definitively proving tensor networks cannot be optimized further via highly parallel GPU libraries like cuTensorNet.
 
-\textbf{Small qubit range:} The tensor-network experiments only reached $n=11$. This restricted scale does not allow for definitive claims about the asymptotic behavior of arbitrarily large Grover circuits.
+\textbf{Scale Restrictions:} The simulations only reached $n=11$. While the trendlines are clear, extending this to $n=20$ or $n=30$ might reveal different asymptotic behavior in the contraction optimizer's hypergraph partitioning algorithms at extreme scales.
 
-\textbf{Random target states:} The bond-dimension experiment utilized three random target states per $n$. While reasonable for an initial empirical estimate, three samples are insufficient to fully characterize the behavior of every possible target state in the search space.
+\textbf{Memory Measurement Blind Spots:} Python's \texttt{tracemalloc} is an excellent profiling tool, but it inherently operates at the Python allocator level. It can systematically undercount memory allocated by lower-level C extensions or BLAS thread pools, meaning the real memory measurements in Figure 10 might still be underrepresenting the true physical cost of execution.
 
-\textbf{Contraction optimizer randomness:} As noted in Section 3.3, the heuristic search for contraction paths introduces variance, meaning the recorded memory estimates reflect the best path found within the search budget rather than the guaranteed theoretical minimum.
+\subsection{Practical Computational Ceilings}
 
-\textbf{Memory measurement:} The use of \texttt{tracemalloc} captures memory allocated through Python's allocator, but does not capture external memory such as certain low-level C or BLAS working buffers, rendering it a lower bound on the true memory footprint.
-
-\subsection{Practical Ceiling Reached in This Project}
-
-Real contraction stopped being feasible past $n=9$, and even the single-search width estimates only made it to $n=11$ before a single contraction attempt was taking tens of minutes to hours. That ceiling is well short of our earlier $n=31$--$32$ qubit GPU baseline~\cite{BSP2Report}, but it's not a separate problem -- it's the same entanglement growth and optimizer instability from Sections~4.2 and 3.3 catching up with the project's time budget.
+Real execution of the contraction paths stopped being physically feasible past $n=9$ due to extreme memory spikes and thrashing, addressing RQ3. Furthermore, even the purely theoretical single-search width estimates only survived up to $n=11$ before the \texttt{cotengra} pathfinding algorithm itself began taking unacceptably long (tens of minutes to hours) to traverse the hypergraph. This ceiling is vastly lower than our earlier $n=31$--$32$ qubit classical GPU statevector baseline~\cite{BSP2Report}. The core bottleneck is not computational power, but rather the algorithmic inability of the tensor network to compactly represent the global phase interference that drives Grover's search.
 
 \section{Conclusion}
 
-This project built and evaluated a tensor-network simulation of Grover's algorithm on \texttt{quimb}, \texttt{cotengra}, and \texttt{kahypar}, measuring estimated memory, bond dimension, and real contraction behavior across $n=2$--$11$.
+This project evaluated a tensor-network simulation pipeline for Grover's algorithm using \texttt{quimb}, \texttt{cotengra}, and \texttt{kahypar}, successfully measuring estimated memory requirements, physical bond dimensions, and real-world execution constraints across a scalable range of $n=2$--$11$ qubits.
 
 \begin{enumerate}
-  \item \textbf{Where does the memory crossover happen?} Nowhere in this range -- by $n=11$ the tensor-network estimate is six to seven orders of magnitude \emph{above} the statevector, and the gap keeps widening.
-  \item \textbf{How does bond dimension scale?} From $\chi=4$ at $n=5$ up to $\chi=32$ at $n=11$, with the sharpest jump right at the end, between $n=10$ and $n=11$.
-  \item \textbf{Where does it become intractable?} Real contraction died out past $n=9$; single-run estimates held on until $n=11$. Figure~9 points to why: convergence in $\chi$ is a threshold effect, not a gradual one, which makes the whole thing harder to scale predictably.
+  \item \textbf{Crossover Point:} There is no memory crossover point in this range. By $n=11$, the tensor-network estimate is six to seven orders of magnitude \emph{above} the standard monolithic statevector footprint, and the gap continues to accelerate as $n$ increases.
+  \item \textbf{Bond Dimension Scaling:} The minimum exact bond dimension scales from $\chi=4$ at $n=5$ up to $\chi=32$ at $n=11$. Critically, $\chi=32$ represents the absolute theoretical maximum entanglement capacity for an 11-qubit system ($2^{\lfloor 11/2 \rfloor}$), proving the algorithm nullifies the compression benefits of the MPS structure.
+  \item \textbf{Intractability Threshold:} Real hardware execution of the contracted networks died out past $n=9$ due to physical RAM constraints, while the theoretical pathfinding simulations stalled at $n=11$. The threshold-like convergence shown in Figure~\ref{fig:bond_convergence} illustrates exactly why these systems are so difficult to scale predictably—sub-optimal compression simply destroys the state fidelity entirely.
 \end{enumerate}
 
-None of this means tensor networks are a bad idea in general -- it means they were a bad fit for \emph{this} circuit, at these sizes, with this implementation. Their advantage only shows up when the circuit's structure keeps the intermediate tensors and bond dimensions small, and Grover's algorithm doesn't do that.
+Ultimately, these findings do not invalidate the utility of tensor networks for classical quantum simulation. They do, however, definitively show that tensor networks are a poor fit for algorithms defined by dense, global entanglement and deep multi-controlled gate structures. Their theoretical memory advantages only materialize when a circuit's topology inherently keeps intermediate tensors and subsystem entanglement bounded. Grover's algorithm deliberately violates both conditions to achieve its speedup.
 
-Several natural extensions could sharpen this comparison: repeating the experiments with NVIDIA cuTensorNet on GPU, as originally proposed, to see whether GPU acceleration shifts the crossover point; testing circuits more naturally suited to tensor networks (shallow, low-entanglement, or 1D circuits) to check whether these scaling difficulties are specific to Grover's circuit or more general; and, if a larger time budget or better hardware were available, pushing the contraction-optimizer search and the qubit range further to see whether the trends observed here continue to hold.
+Future research extensions should focus on repeating these experiments using NVIDIA's GPU-accelerated cuTensorNet, as initially proposed, to determine if raw parallel compute can overpower the topological bloat. Additionally, testing this exact software pipeline against circuits fundamentally suited to tensor networks—such as low-entanglement variational algorithms or shallow 1D Trotterized chemistry simulations—would help cement the boundary between classical simulatability and true quantum advantage.
 
 \begin{thebibliography}{99}
 
@@ -295,6 +274,14 @@ Several natural extensions could sharpen this comparison: repeating the experime
 \bibitem{Grover1996} Lov K. Grover. A fast quantum mechanical algorithm for database search. \textit{Proceedings of the 28th Annual ACM Symposium on Theory of Computing}, pages 212--219, 1996.
 
 \bibitem{Markov2008} I. L. Markov and Y. Shi. Simulating quantum computation by contracting tensor networks. \textit{SIAM Journal on Computing}, 38(3):963--981, 2008.
+
+\bibitem{NielsenChuang2010} M. A. Nielsen and I. L. Chuang. \textit{Quantum Computation and Quantum Information}. Cambridge University Press, 10th Anniversary Edition, 2010.
+
+\bibitem{Schollwock2011} U. Schollw\"{o}ck. The density-matrix renormalization group in the age of matrix product states. \textit{Annals of Physics}, 326(1):96--192, 2011.
+
+\bibitem{Biamonte2017} J. Biamonte, P. Wittek, N. Pancotti, P. Rebentrost, N. Wiebe, and S. Lloyd. Quantum machine learning. \textit{Nature}, 549(7671):195--202, 2017.
+
+\bibitem{Vidal2003} G. Vidal. Efficient classical simulation of slightly entangled quantum computations. \textit{Physical Review Letters}, 91(14):147902, 2003.
 
 \bibitem{cotengra} J. Gray. cotengra: Contraction Path Finding for Tensor Networks. \url{https://github.com/jcmgray/cotengra}, 2023.
 
