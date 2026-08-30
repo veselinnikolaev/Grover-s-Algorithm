@@ -1,0 +1,42 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{amsmath}
+\usepackage[margin=2.5cm]{geometry}
+
+\begin{document}
+
+\begin{center}
+\textbf{Universität Luxemburg} \\
+Faculty of Science, Technology and Medicine \\
+Bachelor in Computer Science \\[1em]
+\textbf{Tensornetzwerk-Simulation des Grover-Algorithmus: \\
+Überwindung der Statevector-Speichergrenze} \\
+Bachelor Semester Project
+\end{center}
+
+\vspace{1em}
+\begin{center}\textbf{Z U S A M M E N F A S S U N G}\end{center}
+
+Ein vorheriges Bachelor Semester Project (BSP2) etablierte eine solide experimentelle Basis für den Grover-Algorithmus mittels klassischer Statevector-Simulation und zeigte dabei die exponentielle "Speicherwand", die dieser Darstellung inhärent ist: Da die Simulation eines $n$-Qubit-Systems das explizite Speichern von $2^n$ komplexen Amplituden erfordert, stieß die Simulation auf der GPU des IRIS-Clusters bereits bei $n=31$–$32$ Qubits an ihre Grenze.
+
+Dieses Projekt untersuchte, ob Tensornetzwerk-Methoden diese Grenze verschieben können, wobei der Speicherbedarf im Idealfall nicht durch die worst-case-Dimension $2^n$, sondern durch die tatsächliche Verschränkungsstruktur des Schaltkreises bestimmt wird. Aus praktischen Gründen wurde dabei von der ursprünglich vorgesehenen GPU-Bibliothek \texttt{cuTensorNet} auf den CPU-basierten Software-Stack \texttt{quimb}, \texttt{cotengra} und \texttt{kahypar} umgestellt. Für $n=2$ bis $n=11$ Qubits wurden drei Größen gemessen: der theoretische Speicherbedarf einer exakten Tensornetzwerk-Kontraktion, die minimale Bindungsdimension $\chi$, die eine Matrix-Product-State-Darstellung (MPS) zur verlustfreien Rekonstruktion benötigt, sowie die Abweichung zwischen dieser Schätzung und dem real gemessenen Speicherverbrauch.
+
+Entgegen der ursprünglichen Hypothese zeigte sich \emph{kein} nachhaltiger Speichervorteil von Tensornetzwerken: Ab etwa $n=7$ wuchs der geschätzte Speicherbedarf der Kontraktion deutlich schneller als der der Statevector-Methode und lag bei $n=11$ bereits sechs bis sieben Größenordnungen darüber. Die minimale Bindungsdimension für exakte Konvergenz stieg von $\chi=4$ bei $n=5$ auf $\chi=32$ bei $n=11$ und erreichte damit die theoretische Obergrenze $2^{\lfloor n/2 \rfloor}$ für maximal verschränkte Zustände. Zudem übertraf der real gemessene Speicherverbrauch die theoretische Schätzung durchgängig um ein bis drei Größenordnungen.
+
+Diese Ergebnisse deuten darauf hin, dass sich der Grover-Algorithmus -- aufgrund der globalen Verschränkung, die sein Diffusionsoperator erzeugt, sowie des durch die Zerlegung des Mehrfach-kontrollierten-X-Gatters verursachten Gatteranzahl-Anstiegs -- schlecht für eine Kompression mittels eindimensionaler Tensornetzwerke eignet. Das Ergebnis ist spezifisch für diesen Algorithmus und stellt keine generelle Aussage über die Grenzen der Tensornetzwerk-Simulation dar.
+
+\vspace{1em}
+\noindent\textbf{Student Details} \\
+Name: Veselin Petrov Nikolaev \\
+Student Number: 0252650117 \\
+Email: veselin.nikolaev.001@student.uni.lu \\
+Secondary Language: German
+
+\vspace{1em}
+\noindent\textbf{Supervisors} \\
+1. Marko Rančić -- marko.rancic@uni.lu \\
+2. Maximilian Streitberger -- maximilian.streitberger@uni.lu
+
+\end{document}
